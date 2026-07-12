@@ -1,0 +1,39 @@
+# === 卫星影像拼合与压缩配置 ===
+
+# 瓦片目录路径
+tiles_dir: "tiles"
+
+# 瓦片 Zoom 级别
+zoom: 16
+
+# 瓦片格式 (png 或 jpg)
+tile_format: "png"
+
+# SHP 文件路径（用于精确裁剪边界）
+# 如果留空，则对全部拼合后的区域进行重采样和压缩，不进行多边形边界裁剪
+shp_path: "city_detailed/3. City/city_wgs84.shp"
+
+# SHP 属性过滤（当 shp_path 不为空时有效）
+# 用于仅提取全省 SHP 中特定的市来进行裁剪
+# shp_filter_column: "city_name"  # SHP中表示市名称的属性字段名
+# shp_filter_value: "深圳市"     # 您要保留并裁剪的那个市的名称
+shp_filter_column: "ct_name"
+shp_filter_value: "威海市"
+
+# 输出目录（存放临时文件 and 最终结果）
+output_dir: "output"
+
+# 重采样算法 (cubic, lanczos, bilinear, nearest 等)
+# 推荐使用 cubic (双三次卷积) 或 lanczos，能保留较平滑的边缘
+resampling_method: "cubic"
+
+# 重采样目标分辨率（单位：米/像素）
+# 比如 5.0 表示重采样为 5 米分辨率
+resolution: 5.0
+
+# 目标输出投影坐标系 (例如: EPSG:4326, EPSG:3857, EPSG:4490)
+# EPSG:4326: WGS 84 (地理坐标系，单位为度，与大多数Shapefile对齐)
+# EPSG:3857: Web Mercator (投影坐标系，单位为米，与瓦片图源原生对齐)
+# EPSG:4490: CGCS2000 (国家2000大地坐标系)
+# 我们推荐将其统一设置为 EPSG:4326 以完美匹配您的 Shapefile
+output_srs: "EPSG:4326"
