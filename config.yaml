@@ -23,4 +23,5 @@ quark:
   skill_dir: ~/.codex/skills/quarkclouddrive
   bash: C:/Program Files/Git/bin/bash.exe
   timeout_seconds: 21600
-  # parent_fid: set only to a folder explicitly selected by the user
+  parent_fid: d2466a17d22d4d1eb29e23b56c256cb4
+  folder_label: 夸克网盘默认位置/新疆
