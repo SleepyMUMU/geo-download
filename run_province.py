@@ -117,7 +117,7 @@ def download_worker(cities, queue):
     for idx, city in enumerate(cities, 1):
         # 移除可能破坏路径的特殊字符
         safe_city_name = city.replace("/", "_").replace("\\", "_")
-        temp_config_path = f"C:/satellite-pipeline/_temp_config_download_{safe_city_name}.yaml"
+        temp_config_path = os.path.join(SCRIPT_DIR, f"_temp_config_download_{safe_city_name}.yaml")
         log_path = f"{LOGS_DIR}/{safe_city_name}_download.log"
         
         safe_print(f"[PRODUCER] >>> [{city}] ({idx}/{len(cities)}) 开始背景下载瓦片... 详情查看: {log_path}")
@@ -132,7 +132,7 @@ def download_worker(cities, queue):
             
             # 运行下载模块并实时重定向/流式输出日志
             returncode = run_command_stream(
-                [sys.executable, "-u", "C:/satellite-pipeline/download_tiles.py", "--config", temp_config_path],
+                [sys.executable, "-u", os.path.join(SCRIPT_DIR, "download_tiles.py"), "--config", temp_config_path],
                 log_path,
                 f"DOWNLOAD:{city}",
                 COLOR_CYAN
@@ -200,7 +200,7 @@ def main():
     cities = []
     skipped_cities = []
     for city in all_cities:
-        target_tif = f"C:/satellite-pipeline/output/{city}.tif"
+        target_tif = os.path.join(SCRIPT_DIR, "output", f"{city}.tif")
         if os.path.exists(target_tif):
             skipped_cities.append(city)
         else:
@@ -246,7 +246,7 @@ def main():
         upload_log_path = f"{LOGS_DIR}/{safe_name}_upload.log"
         try:
             returncode = run_command_stream(
-                [sys.executable, "C:/satellite-pipeline/upload_to_quark.py", "--city", city_name],
+                [sys.executable, os.path.join(SCRIPT_DIR, "upload_to_quark.py"), "--city", city_name],
                 upload_log_path,
                 f"UPLOAD:{city_name}",
                 COLOR_YELLOW
@@ -283,7 +283,7 @@ def main():
             continue
             
         # 开始拼合、重采样、裁剪与压缩
-        temp_config_path = f"C:/satellite-pipeline/_temp_config_process_{safe_city_name}.yaml"
+        temp_config_path = os.path.join(SCRIPT_DIR, f"_temp_config_process_{safe_city_name}.yaml")
         log_path = f"{LOGS_DIR}/{safe_city_name}_process.log"
         safe_print(f"[CONSUMER] >>> [{city}] 开始重采样、裁剪与无损压制... 详情查看: {log_path}")
         
@@ -295,7 +295,7 @@ def main():
             save_yaml(temp_config_path, proc_config)
             
             returncode = run_command_stream(
-                [sys.executable, "-u", "C:/satellite-pipeline/process_tiles.py", "--config", temp_config_path],
+                [sys.executable, "-u", os.path.join(SCRIPT_DIR, "process_tiles.py"), "--config", temp_config_path],
                 log_path,
                 f"PROCESS:{city}",
                 COLOR_GREEN
