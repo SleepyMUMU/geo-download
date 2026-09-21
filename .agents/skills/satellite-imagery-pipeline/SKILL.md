@@ -1,87 +1,13 @@
-# SKILL.md
 ---
 name: satellite-imagery-pipeline
-description: Encapsulates the satellite imagery download, processing, upload, verification, and cleanup workflow as an Antigravity skill.
+description: 根据用户选中的压缩包文件识别城市并下载影像，生成5米UTM、GM 8-bit调色板GeoTIFF；用于本项目的卫星影像任务和无历史记忆交接。
 ---
 
-## Overview
-This skill automates the end‑to‑end pipeline for downloading high‑resolution satellite tiles, correcting coordinate systems, resampling & compressing them, uploading to Quark (Kuake) cloud storage, verifying the upload, and finally syncing the codebase to GitHub. It is designed to **robust** with automatic retry, pre‑flight coordinate correction, and clear user reporting.
-
-## Prerequisites
-- Python 3.9+ with the project dependencies installed (GDAL, geopandas, etc.)
-- The project directory must be located at `D:/WorkSpace/AI/Geo Download` (or set the `SCRIPT_DIR` environment variable accordingly).
-- `kuake` CLI installed and authenticated for Quark cloud storage.
-- `git` and `gh` CLI configured for the target GitHub repository.
-- Optional: custom tile source URL (defaults to the ArcGIS Wayback service).
-
-## Parameters
-| Parameter | Description | Required | Default |
-|-----------|-------------|----------|---------|
-| `province` | Chinese province name (e.g., `辽宁`) | ✅ | – |
-| `source_url` | Tile source base URL (supports ArcGIS, Gaode, Alibaba) | ❌ | ArcGIS Wayback URL pre‑configured in `config.yaml` |
-| `compression` | GDAL compression level (0‑9) | ❌ | `9` |
-| `color_space` | Output color space (`RGB`, `PCT`, etc.) | ❌ | `PCT` |
-| `retry_limit` | Number of automatic retries for download/compress/upload failures | ❌ | `1` |
-
-## Execution Steps
-1. **Coordinate Pre‑check & Correction**
-   - Run `convert_gcj02_to_wgs84.py` on the province shapefile.
-   - If the shapefile already uses WGS‑84, the script exits silently.
-   - Any error is reported to the user and halts further processing.
-
-2. **City Discovery**
-   - Load `DEFAULT_CITY_SHP` and extract all **city names** belonging to the given province.
-   - Skip cities that already have a final `*.tif` in `output/` and record them as **already processed**.
-
-3. **Asynchronous Dual‑Engine Pipeline**
-   - **Downloader** thread pool (max 8 workers) pulls tiles for each city using the chosen `source_url`.
-   - **Processor** consumes from the queue, generating a temporary config YAML, then runs `process_tiles.py` to:
-     - Merge tiles (VRT)
-     - Resample to 5 m resolution (Lanczos)
-     - Convert to the desired color space
-     - Apply DEFLATE compression (`ZLEVEL=9`, `PREDICTOR=1`, `BIGTIFF=IF_NEEDED`)
-     - Build overviews/pyramids
-   - On **success**, the city is queued for upload. On **failure**, the step is **retried once** (controlled by `retry_limit`). If it still fails, the city is added to `fail_cities` and the user is notified.
-
-4. **Asynchronous Upload**
-   - A single‑thread `ThreadPoolExecutor` uploads each successful city via `upload_to_quark.py`.
-   - Upload logs are saved under `logs/` with the pattern `<city>_upload.log`.
-   - Failed uploads are retried once; persistent failures are recorded in `upload_fail`.
-
-5. **Cloud Verification (Kuake)**
-   - After **all** uploads finish, run `kuake list` (or `kuake ls`) on the target Quark folder.
-   - Compare the remote file list with the local `output/` directory.
-   - If any city is missing or the file size differs, **report to the user** and **do not proceed to cleanup**.
-   - If verification passes, continue.
-
-6. **GitHub Sync**
-   - Stage any changed configuration or scripts.
-   - Commit with message `"[pipeline] Update after processing {province}"`.
-   - Push to the remote repository using `git push` (or `gh repo sync`).
-   - If the `gh` CLI is not found, the skill **restarts the terminal** (powershell‑windows skill) and retries.
-
-7. **Final Cleanup**
-   - Delete temporary config files (`_temp_config_*.yaml`).
-   - Remove intermediate tile caches under `cache/`.
-   - Optionally, delete original downloaded tiles if the user sets `cleanup=true`.
-
-## Reporting
-- A concise **summary** is printed at the end of execution, showing:
-  - Total cities discovered, processed, skipped, failed (download/compress) and failed uploads.
-  - Any verification mismatches.
-- If verification fails, the skill **pauses** and prompts the user to either retry the upload step or abort.
-
-## Usage Example
-```bash
-# Activate the skill (Antigravity CLI)
-agy run satellite-imagery-pipeline --province 辽宁 --source_url https://example.com/tiles --compression 8
-```
-The skill will walk through the steps automatically, handling retries and reporting progress.
-
-## Extensibility
-- To add a new tile source, extend `config.yaml` with the appropriate URL template.
-- Adjust `max_threads` in `run_province.py` if a different concurrency level is needed.
-- The skill can be invoked from other agents via `invoke_subagent` by referencing its name.
-
----
-*End of skill definition*
+先从本技能目录向上三级定位项目根目录，阅读 README.md、HANDOFF.md、config.yaml。
+执行入口、输入限制和验收参数以 README 为准；不要执行旧归档报告中的流程。
+当前用户已搁置夸克。只执行本地识别、下载、处理、验收，禁止上传和删除本地数据。
+收到压缩包后先 inspect，再对用户指定的精确成员路径 plan。检查唯一城市归属及证据，不处理未选文件。
+新疆县级任务已建立专用目录时，直接使用 `python xinjiang.py list/plan/run`；只允许目录中的77个目标，不重新解析或扩大用户排除范围。
+运行 plan.json 对应任务。检查质量报告及量化前后对照图；可以由模型完成目视检查并记下 review，不需要让用户再批准普通验收。
+向用户汇报图源版本、输出5米像元、GM 256色定义、UTM分带、已验证和未验证范围。
+遇到范围、名称或位置冲突再澄清；不要伪造识别、下载、质量或同步成功。

@@ -1,0 +1,130 @@
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+import geo_common as common
+import imagery
+import tasks
+import quark_backend
+import tempfile
+import unittest
+import zipfile
+import json
+import numpy as np
+from unittest.mock import patch
+from PIL import Image
+from shapely.geometry import box
+
+class PipelineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg=common.load_config()
+        cls.df=common.cities(cls.cfg)
+
+    def test_exact_city_and_unknown_fail(self):
+        self.assertEqual(common.match_city(self.df,'威海').ct_name,'威海市')
+        with self.assertRaises(ValueError): common.match_city(self.df,'海')
+
+    def test_source_cache_isolation(self):
+        import mercantile
+        c=dict(self.cfg); c['custom_url']+='?different-release'
+        t=mercantile.Tile(1,1,16)
+        self.assertNotEqual(common.tile_path(c,t),common.tile_path(self.cfg,t))
+
+    def test_corrupt_tile_not_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'tile.png';p.write_text('<html>error</html>')
+            self.assertFalse(imagery.validate_tile(p))
+            Image.new('RGB',(256,256)).save(p)
+            self.assertTrue(imagery.validate_tile(p))
+
+    def test_archive_selection_and_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'input.zip'
+            with zipfile.ZipFile(p,'w') as z:
+                z.writestr('山东省/威海市.txt','data')
+                z.writestr('辽宁省/大连市.txt','do not select')
+            cfg=dict(self.cfg,jobs_dir=str(Path(tmp)/'jobs'))
+            path,plan=tasks.make_plan(cfg,archive=p,selected=['山东省/威海市.txt'])
+            self.assertEqual([j['city'] for j in plan['jobs']],['威海市'])
+            tasks.validate_plan(path,cfg)
+            with self.assertRaises(ValueError): tasks.make_plan(cfg,archive=p)
+            with zipfile.ZipFile(p,'a') as z:z.writestr('../bad.txt','x')
+            with self.assertRaises(ValueError):tasks.zip_entries(p)
+            with self.assertRaises(ValueError):tasks.validate_plan(path,cfg)
+
+    def test_palette_block_boundary_invariance(self):
+        rng=np.random.default_rng(42)
+        rgb=rng.integers(0,256,(73,129,3),dtype=np.uint8)
+        pal=imagery.make_palette(rgb.reshape(-1,3))
+        full=imagery.map_palette(rgb,pal)
+        pieces=np.concatenate([imagery.map_palette(rgb[:,:61],pal),
+                               imagery.map_palette(rgb[:,61:],pal,61,0)],axis=1)
+        np.testing.assert_array_equal(full,pieces)
+
+    def test_quark_false_success_rejected(self):
+        for text,code in [('',0),('not json',0),
+            (json.dumps({'type':'result','code':-204,'msg':'failed','data':{}}),0),
+            (json.dumps({'type':'result','code':0,'data':{}}),1)]:
+            with self.assertRaises(RuntimeError):quark_backend.parse_result(text,code)
+
+    def test_missing_tile_stops_processing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=dict(self.cfg,cache_dir=tmp)
+            geom=box(122.11,37.50,122.112,37.502)
+            with self.assertRaises(RuntimeError):
+                imagery.build_vrt(cfg,common.expected_tiles(geom,16),Path(tmp))
+
+    def test_download_errors_are_not_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=dict(self.cfg,cache_dir=tmp,jobs_dir=tmp,retries=1)
+            with patch('requests.Session.get',side_effect=imagery.requests.ConnectionError('offline')):
+                with self.assertRaises(RuntimeError):imagery.download(cfg,box(122.11,37.50,122.111,37.501))
+            self.assertTrue((Path(tmp)/'download_failures.json').exists())
+
+    def test_spatial_filename_conflict(self):
+        from shapely.geometry import mapping
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'conflict.zip'
+            content=json.dumps({'type':'FeatureCollection','features':[{'type':'Feature','properties':{},
+                 'geometry':mapping(box(122.10,37.49,122.101,37.491))}]})
+            with zipfile.ZipFile(p,'w') as z:z.writestr('大连市.geojson',content)
+            with self.assertRaises(ValueError):tasks.resolve_file(p,'大连市.geojson',self.cfg,self.df,tmp)
+
+    def test_spatial_only_identification(self):
+        from shapely.geometry import mapping
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'spatial.zip'
+            content=json.dumps({'type':'FeatureCollection','features':[{'type':'Feature','properties':{},
+                 'geometry':mapping(box(122.10,37.49,122.101,37.491))}]})
+            with zipfile.ZipFile(p,'w') as z:z.writestr('区域001.geojson',content)
+            row,evidence=tasks.resolve_file(p,'区域001.geojson',self.cfg,self.df,tmp)
+            self.assertEqual(row.ct_name,'威海市')
+
+    def test_cloud_receipt_is_not_blindly_reuploaded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'sample.bin';f.write_bytes(b'abc')
+            receipt=Path(tmp)/'receipt.json'
+            common.write_json(receipt,{'local_sha256':common.digest_file(f),'parent_fid':'chosen', 'fid':'old'})
+            cfg=dict(self.cfg,quark=dict(self.cfg['quark'],parent_fid='chosen'))
+            q=quark_backend.Quark(cfg,'test','1-abcdef')
+            with patch.object(q,'verify',return_value=False),patch.object(q,'call') as call:
+                with self.assertRaises(RuntimeError):q.upload(f,receipt)
+                call.assert_not_called()
+
+    def test_synthetic_geotiff_full_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg=dict(self.cfg,cache_dir=str(Path(tmp)/'tiles'),output_dir=str(Path(tmp)/'out'))
+            geom=box(122.11,37.50,122.114,37.504)
+            tiles=common.expected_tiles(geom,16)
+            for tile in tiles:
+                p=common.tile_path(cfg,tile);p.parent.mkdir(parents=True,exist_ok=True)
+                yy,xx=np.mgrid[:256,:256]
+                rgb=np.stack([80+xx//4,80+yy//4,60+(xx+yy)//8],axis=-1).astype(np.uint8)
+                Image.fromarray(rgb).save(p)
+            artifact=imagery.process(cfg,geom,'测试','test',Path(tmp)/'work',tiles)
+            self.assertEqual(artifact['epsg'],32651)
+            self.assertTrue(artifact['quality']['passed'])
+            self.assertTrue(artifact['quality']['full_readback_verified'])
+            self.assertEqual(common.digest_file(artifact['path']),artifact['sha256'])
+
+if __name__=='__main__':unittest.main(verbosity=2)

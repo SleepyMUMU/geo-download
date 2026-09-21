@@ -1,0 +1,8 @@
+{
+  "itemID": "925025d364fa4e49958f4f1dd2362beb",
+  "itemTitle": "World Imagery (Wayback 2025-09-25)",
+  "itemURL": "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/58924/{level}/{row}/{col}",
+  "metadataLayerUrl": "https://metadata.maptiles.arcgis.com/arcgis/rest/services/World_Imagery_Metadata_2025_r09/MapServer",
+  "metadataLayerItemID": "7882c43daf3d4955bed8b5de18bccd82",
+  "layerIdentifier": "WB_2025_R09"
+}

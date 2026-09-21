@@ -1,48 +1,26 @@
-# === 卫星瓦片下载配置 ===
-
-# 图源配置（可选: esri, google, bing, custom）
-tile_source: "custom"
-
-# 自定义 XYZ URL 模板（仅 tile_source=custom 时使用）
-# 占位符: {z} {x} {y}
-custom_url: "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/58924/{z}/{y}/{x}"
-
-# 常用图源 URL（脚本内置，无需修改）:
-#   esri:   https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
-#   google: https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}
-#   bing:   https://ecn.t0.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=587
-
-# === 下载参数 ===
+# 5 m UTM / GM 8-bit palette output. See README and HANDOFF.
+tile_source: custom
+custom_url: https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/58924/{z}/{y}/{x}
+source_crs: EPSG:3857
+tile_size: 256
 zoom: 16
-
-# SHP 文件路径（用于定义下载边界）
-# 留空则使用下方的 bbox 矩形范围
-shp_path: "city_detailed/3. City/city_wgs84.shp"
-
-# SHP 属性过滤（当 shp_path 不为空时有效）
-# 比如您的 SHP 是全省的，但只需下载其中某个市，您可以设置过滤字段和值：
-# shp_filter_column: "city_name"  # SHP中表示市名称的属性字段名
-# shp_filter_value: "深圳市"     # 您要下载的那个市的名称
-shp_filter_column: "ct_name"
-shp_filter_value: "威海市"
-
-# 矩形边界框（当 shp_path 为空时使用）
-# 格式: [西经, 南纬, 东经, 北纬]
-# 以下示例为一个约 2km x 2km 的小测试区域（旧金山）
-bbox: [-122.42, 37.77, -122.40, 37.79]
-
-# 输出目录
-output_dir: "tiles"
-
-# 并发下载线程数
+resolution: 5
+color_mode: palette8
+resampling: average
+palette_samples: 262144
+dither_strength: 4
 max_threads: 8
-
-# 瓦片图片格式
-tile_format: "png"
-
-# 断点续传：跳过已存在的瓦片
-skip_existing: true
-
-# === 代理配置 ===
-# 如需通过代理访问瓦片服务器，填写代理地址
-proxy: "http://127.0.0.1:7897"
+retries: 3
+proxy: http://127.0.0.1:7897
+city_shp: city_detailed/3. City/city_wgs84.shp
+cache_dir: tiles_v2
+output_dir: output
+jobs_dir: jobs
+quality:
+  max_mae_dn: 6.0
+  max_p99_dn: 24
+quark:
+  skill_dir: ~/.codex/skills/quarkclouddrive
+  bash: C:/Program Files/Git/bin/bash.exe
+  timeout_seconds: 21600
+  # parent_fid: set only to a folder explicitly selected by the user
