@@ -16,16 +16,13 @@ from xinjiang import catalog
 
 ROOT=Path(__file__).resolve().parent
 
-# 按原始 ZIP 文件计数：16～30 所在的10个文件，再追加其后的5个文件。
-DEFAULT_SOURCE_FILES = (
-    '16.shp', '17.shp', '18.shp', '19_23.shp', '20_21.shp',
-    '22_24.shp', '25_26_28.shp', '102_27.shp', '29_101.shp', '30.shp',
-    '31.shp', '32.shp', '33.shp', '34_35.shp', '36_37.shp',
+# 原始 ZIP 中的文件顺序。选择“区域”指这张文件清单上的连续范围。
+SOURCE_FILE_ORDER = (
+    '19_23.shp', '20_21.shp', '22_24.shp', '25_26_28.shp',
+    '102_27.shp', '29_101.shp', '30.shp', '31.shp', '32.shp', '33.shp',
+    '34_35.shp', '36_37.shp', '38_40_45_97.shp', '39.shp', '41.shp', '42_43.shp',
 )
 SOURCE_FILE_CODES = {
-    '16.shp': ('650521',),
-    '17.shp': ('650522',),
-    '18.shp': ('652301',),
     '19_23.shp': ('652302', '652327'),
     '20_21.shp': ('652323', '652324'),
     '22_24.shp': ('652325', '652328'),
@@ -38,8 +35,29 @@ SOURCE_FILE_CODES = {
     '33.shp': ('652825',),
     '34_35.shp': ('652826', '652827'),
     '36_37.shp': ('652828', '652829'),
+    '38_40_45_97.shp': ('652901', '652922', '652928', '659002'),
+    '39.shp': ('652902',),
+    '41.shp': ('652924',),
+    '42_43.shp': ('652925', '652926'),
 }
-EXCLUDED_CODES = {'659006', '659007'}  # 铁门关市、双河市
+
+# 最方便的源码配置入口：修改这两个文件名即可选择一个连续文件区域。
+FILE_RANGE_START = '19_23.shp'
+FILE_RANGE_END = '42_43.shp'
+
+# 用户明确排除的自治区直辖县级市；即使与允许地区位于同一文件也不会下载。
+EXCLUDED_CODES = {f'659{i:03d}' for i in range(1,12)}
+
+def resolve_source_files(start_file, end_file, explicit_files=()):
+    if explicit_files:
+        return tuple(explicit_files)
+    try:
+        start=SOURCE_FILE_ORDER.index(start_file); end=SOURCE_FILE_ORDER.index(end_file)
+    except ValueError as exc:
+        raise ValueError(f'起止文件不在可选清单中: {exc}') from exc
+    if start>end:
+        raise ValueError('起始文件必须位于结束文件之前')
+    return SOURCE_FILE_ORDER[start:end+1]
 
 def select_source_files(g, source_files):
     selected=[]
@@ -53,8 +71,9 @@ def select_source_files(g, source_files):
             if len(hit)!=1:
                 raise ValueError(f'{source_file} 对应行政区不存在或不唯一: {code}')
             selected.append((source_file,hit.iloc[0]))
+    if not selected:
+        raise ValueError('所选文件区域中没有可下载地区')
     return selected
-
 class Status:
     def __init__(self,folder,rows):
         self.folder=Path(folder); self.folder.mkdir(parents=True,exist_ok=True)
@@ -86,14 +105,20 @@ def valid_existing(state_path):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--source-file',action='append',choices=SOURCE_FILE_CODES)
+    p.add_argument('--start-file',choices=SOURCE_FILE_ORDER,default=FILE_RANGE_START,
+                   help='连续文件区域的起始文件')
+    p.add_argument('--end-file',choices=SOURCE_FILE_ORDER,default=FILE_RANGE_END,
+                   help='连续文件区域的结束文件')
+    p.add_argument('--source-file',action='append',choices=SOURCE_FILE_ORDER,
+                   help='显式选择单个原始文件，可重复；填写后覆盖起止范围')
     p.add_argument('--downloaders',type=int,default=2)
     p.add_argument('--session-id',required=True)
     p.add_argument('--session-input-file',required=True)
     a=p.parse_args(); cfg=common.load_config(); g=catalog().reset_index(drop=True)
-    source_files=tuple(a.source_file or DEFAULT_SOURCE_FILES)
+    source_files=resolve_source_files(a.start_file,a.end_file,a.source_file or ())
     chosen=select_source_files(g,source_files)
-    batch=Path(cfg['jobs_dir'])/'xinjiang-files-16-through-36_37'
+    selection_id=common.fingerprint({'source_files':source_files})[:10]
+    batch=Path(cfg['jobs_dir'])/f'xinjiang-selection-{selection_id}'
     now=time.strftime('%Y-%m-%d %H:%M:%S')
     file_numbers={name:i+1 for i,name in enumerate(source_files)}
     rows=[{'文件序号':file_numbers[source_file],'源文件':source_file,'城市':r.dt_name,'code':str(r.dt_adcode),
