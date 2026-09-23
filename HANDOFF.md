@@ -9,3 +9,4 @@
 7. 本地已通过 12 项自动测试及 36 瓦片小样；已核对新疆 ZIP 文件结构，但尚未完成当前文件区域的全量处理和云端端到端验收。不要继承旧报告中的“14 市已核验”等结论。
 8. 当前成果和任务状态在 output/ 与 jobs/；保留本地文件，不自动清理。夸克使用官方 Skill、config.yaml 中的 parent_fid，并通过云端重新列表核验。
 9. 新疆批量文件区域使用 `xinjiang_batch.py`；单地区仍可使用 `python xinjiang.py list/plan/run`。原 ZIP 的 DBF 中文尾字节存在截断，行政区名称按行政代码校正，几何取原始 EPSG:4326 总表。
+10. 用户最新指示：空间不足时自动清理下载过且不再需要的瓦片和中间缓存。使用 `cleanup_cache.py --watch` 监控当前流水线；仅在本地成果哈希、quality.json、visual_review.json 和云端上传回执均通过后清理，并保留所有未完成地区可能复用的瓦片。本地 GeoTIFF、对照图及核验记录不可删除。

@@ -6,6 +6,7 @@ import imagery
 import tasks
 import quark_backend
 import xinjiang_batch
+import cleanup_cache
 import tempfile
 import unittest
 import zipfile
@@ -135,6 +136,35 @@ class PipelineTests(unittest.TestCase):
             first.update('652302',下载状态='已下载')
             resumed=xinjiang_batch.Status(tmp,[row])
             self.assertEqual(resumed.rows['652302']['下载状态'],'已下载')
+
+    def test_cleanup_preserves_tiles_in_pending_area(self):
+        import mercantile
+        tile=mercantile.Tile(48497,24045,16)
+        bounds=mercantile.bounds(tile)
+        self.assertTrue(cleanup_cache.overlaps_pending(tile,[bounds]))
+        self.assertFalse(cleanup_cache.overlaps_pending(tile,[(0,0,1,1)]))
+
+    def test_cleanup_requires_cloud_and_visual_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); work=root/'work'; work.mkdir()
+            output=root/'out'; output.mkdir()
+            artifact_path=output/'result.tif'; artifact_path.write_bytes(b'complete')
+            artifact={'path':str(artifact_path),'size':artifact_path.stat().st_size,
+                      'sha256':common.digest_file(artifact_path),
+                      'comparisons':[str(work/'comparison.png')]}
+            (work/'comparison.png').write_bytes(b'preview')
+            common.write_json(work/'state.json',{'status':'processed','artifact':artifact})
+            common.write_json(work/'quality.json',{'passed':True,'full_readback_verified':True})
+            common.write_json(work/'visual_review.json',{'result':'pass'})
+            receipt={'verified':True,'verification':'fresh_listing_fid_name_size',
+                     'cloud_listing_fid':'cloud-id','local_sha256':artifact['sha256'],
+                     'size':artifact['size'],'parent_fid':'folder'}
+            common.write_json(work/'upload_receipt.json',receipt)
+            row={'压制状态':'已压制（质检通过）','上传状态':'已上传并核验'}
+            self.assertTrue(cleanup_cache.verified_row(row,work,output,'folder'))
+            receipt['verified']=False
+            common.write_json(work/'upload_receipt.json',receipt)
+            self.assertFalse(cleanup_cache.verified_row(row,work,output,'folder'))
 
     def test_synthetic_geotiff_full_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
