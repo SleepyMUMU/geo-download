@@ -89,8 +89,10 @@ class Quark:
             if receipt.get('local_sha256')==sha and receipt.get('parent_fid')==parent:
                 fid=receipt.get('fid')
                 if fid:
-                    if not self.verify(parent,fid,path.name,size):
+                    listed_fid=self.verify(parent,fid,path.name,size)
+                    if not listed_fid:
                         raise RuntimeError('已有上传回执，但云端核验不符；禁止盲目重复上传')
+                    receipt['cloud_listing_fid']=listed_fid
                     receipt['verified']=True
                     receipt['verification']='fresh_listing_fid_name_size'
                     receipt['full_hash_readback']=False
@@ -105,8 +107,10 @@ class Quark:
                  'parent_fid':parent,'full_path':data.get('fullPath'),
                  'verified':False,'verification':'pending'}
         common.write_json(receipt_path,receipt)
-        if not self.verify(parent,receipt['fid'],path.name,size):
+        listed_fid=self.verify(parent,receipt['fid'],path.name,size)
+        if not listed_fid:
             raise RuntimeError('上传后云端文件名/大小核验失败，保留本地文件')
+        receipt['cloud_listing_fid']=listed_fid
         receipt['verification']='fresh_listing_fid_name_size'
         receipt['full_hash_readback']=False
         receipt['verified']=True
@@ -125,12 +129,14 @@ class Quark:
             raise RuntimeError('云端回读哈希不符，保留所有本地文件')
 
     def verify(self,parent,fid,name,size):
-        tail=lambda s:str(s).split('|')[-1]
         if parent is None:
             if len(name)>50: raise ValueError('文件名超过搜索长度限制，需要指定云端目录 FID 后核验')
             events,_=self.call(['search','--keyword',name,'--stdout-only'])
             items=self.artifact_items(events)
         else:
             items=self.browse(parent)
-        matches=[f for f in items if f.get('fid') and tail(f['fid'])==tail(fid)]
-        return len(matches)==1 and matches[0].get('filename')==name and matches[0].get('size')==size
+        # The official CLI can present an opaque listing FID distinct from the
+        # upload response FID. Match the unique cloud entry by exact name/size,
+        # and retain both identifiers in the receipt for audit.
+        matches=[f for f in items if f.get('fid') and f.get('filename')==name and f.get('size')==size]
+        return matches[0]['fid'] if len(matches)==1 else None

@@ -77,7 +77,12 @@ def select_source_files(g, source_files):
 class Status:
     def __init__(self,folder,rows):
         self.folder=Path(folder); self.folder.mkdir(parents=True,exist_ok=True)
-        self.rows={r['code']:r for r in rows}; self.guard=threading.Lock(); self.save()
+        previous={}
+        path=self.folder/'status.json'
+        if path.exists():
+            previous={r['code']:r for r in json.loads(path.read_text(encoding='utf-8'))}
+        self.rows={r['code']:previous.get(r['code'],r) for r in rows}
+        self.guard=threading.Lock(); self.save()
     def update(self,code,**values):
         with self.guard:
             self.rows[code].update(values,last_update=time.strftime('%Y-%m-%d %H:%M:%S'))
@@ -98,7 +103,15 @@ def valid_existing(state_path):
     if not state_path.exists(): return None
     try:
         state=json.loads(state_path.read_text(encoding='utf-8')); artifact=state.get('artifact')
-        if artifact and Path(artifact['path']).exists() and common.digest_file(artifact['path'])==artifact['sha256']:
+        work=state_path.parent
+        quality_path=work/'quality.json'
+        quality=json.loads(quality_path.read_text(encoding='utf-8'))
+        comparisons=artifact.get('comparisons',[]) if artifact else []
+        if (artifact and quality.get('passed') is True and quality.get('full_readback_verified') is True
+                and comparisons and all(Path(p).is_file() for p in comparisons)
+                and Path(artifact['path']).exists()
+                and Path(artifact['path']).stat().st_size==artifact['size']
+                and common.digest_file(artifact['path'])==artifact['sha256']):
             return artifact
     except Exception: pass
     return None
@@ -138,7 +151,7 @@ def main():
     def download_one(job,geom,work):
         code=job['code']; state=work/'state.json'; artifact=valid_existing(state)
         if artifact:
-            status.update(code,下载状态='已下载',压制状态='已压制',备注='复用已校验成果')
+            status.update(code,下载状态='已下载',压制状态='已压制（质检通过）',备注='复用已核验成果')
             completed.put((job,geom,work,None,artifact,None)); return
         status.update(code,下载状态='下载中')
         try:

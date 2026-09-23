@@ -5,6 +5,7 @@ import geo_common as common
 import imagery
 import tasks
 import quark_backend
+import xinjiang_batch
 import tempfile
 import unittest
 import zipfile
@@ -110,6 +111,30 @@ class PipelineTests(unittest.TestCase):
             with patch.object(q,'verify',return_value=False),patch.object(q,'call') as call:
                 with self.assertRaises(RuntimeError):q.upload(f,receipt)
                 call.assert_not_called()
+
+    def test_cloud_listing_accepts_unique_opaque_fid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f=Path(tmp)/'sample.bin'; f.write_bytes(b'abc')
+            receipt=Path(tmp)/'receipt.json'
+            common.write_json(receipt,{'local_sha256':common.digest_file(f),
+                                       'parent_fid':'chosen','fid':'upload-fid'})
+            cfg=dict(self.cfg,quark=dict(self.cfg['quark'],parent_fid='chosen'))
+            q=quark_backend.Quark(cfg,'test','1-abcdef')
+            listing=[{'fid':'opaque-list-fid','filename':f.name,'size':f.stat().st_size}]
+            with patch.object(q,'browse',return_value=listing),patch.object(q,'call') as call:
+                result=q.upload(f,receipt)
+                call.assert_not_called()
+            self.assertTrue(result['verified'])
+            self.assertEqual(result['cloud_listing_fid'],'opaque-list-fid')
+
+    def test_batch_status_survives_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            row={'code':'652302','下载状态':'等待','压制状态':'等待',
+                 '上传状态':'等待','文件序号':1,'源文件':'19_23.shp','城市':'阜康市','last_update':'','备注':''}
+            first=xinjiang_batch.Status(tmp,[row])
+            first.update('652302',下载状态='已下载')
+            resumed=xinjiang_batch.Status(tmp,[row])
+            self.assertEqual(resumed.rows['652302']['下载状态'],'已下载')
 
     def test_synthetic_geotiff_full_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
