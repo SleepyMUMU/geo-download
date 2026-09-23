@@ -146,6 +146,15 @@ def validate_output(path, epsg, expected=None):
 def process(cfg, geom, city, code, work, tiles=None):
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
+    processing_threads = int(cfg.get('processing_threads', 8))
+    warp_memory_mb = int(cfg.get('warp_memory_mb', 512))
+    gdal_cache_mb = int(cfg.get('gdal_cache_mb', 512))
+    if not 1 <= processing_threads <= 64 or warp_memory_mb < 64 or gdal_cache_mb < 64:
+        raise ValueError('GDAL 处理线程或缓存参数无效')
+    # These settings affect this pipeline process only, not the Conda environment.
+    gdal.SetConfigOption('GDAL_NUM_THREADS', str(processing_threads))
+    gdal.SetCacheMax(gdal_cache_mb * 1024 * 1024)
+    print(f'GDAL 处理: {processing_threads} 线程，warp {warp_memory_mb} MiB，缓存 {gdal_cache_mb} MiB', flush=True)
     epsg = common.utm_for(geom)
     tiles = tiles or common.expected_tiles(geom, cfg['zoom'])
     vrt = build_vrt(cfg, tiles, work)
@@ -154,13 +163,14 @@ def process(cfg, geom, city, code, work, tiles=None):
     common.write_json(cutline, {'type':'FeatureCollection', 'features':[
         {'type':'Feature', 'properties':{}, 'geometry':mapping(geom)}]})
     rgb_path = work / 'reference_rgb.tif'
-    options = ['TILED=YES', 'COMPRESS=DEFLATE', 'PREDICTOR=2', 'ZLEVEL=6', 'BIGTIFF=YES']
+    options = ['TILED=YES', 'COMPRESS=DEFLATE', 'PREDICTOR=2', 'ZLEVEL=6', 'BIGTIFF=YES',
+               f'NUM_THREADS={processing_threads}']
     rgb = gdal.Warp(str(rgb_path), str(vrt), options=gdal.WarpOptions(
         format='GTiff', dstSRS=f'EPSG:{epsg}', xRes=5, yRes=5,
         targetAlignedPixels=True, resampleAlg='average', outputType=gdal.GDT_Byte,
         cutlineDSName=str(cutline), cropToCutline=True, dstAlpha=True,
-        creationOptions=options, warpMemoryLimit=256,
-        warpOptions=['NUM_THREADS=2']))
+        creationOptions=options, warpMemoryLimit=warp_memory_mb,
+        warpOptions=[f'NUM_THREADS={processing_threads}'], multithread=True))
     if rgb is None or rgb.RasterCount != 4:
         raise RuntimeError('UTM 重投影失败')
     rgb.FlushCache()
@@ -173,7 +183,8 @@ def process(cfg, geom, city, code, work, tiles=None):
     partial = out.with_suffix('.partial.tif')
     gdal.SetConfigOption('GDAL_TIFF_INTERNAL_MASK', 'YES')
     result = gdal.GetDriverByName('GTiff').Create(str(partial), rgb.RasterXSize, rgb.RasterYSize,
-        1, gdal.GDT_Byte, options=['TILED=YES','COMPRESS=DEFLATE','ZLEVEL=6','BIGTIFF=YES'])
+        1, gdal.GDT_Byte, options=['TILED=YES','COMPRESS=DEFLATE','ZLEVEL=6','BIGTIFF=YES',
+                                   f'NUM_THREADS={processing_threads}'])
     result.SetGeoTransform(rgb.GetGeoTransform())
     result.SetProjection(rgb.GetProjection())
     result.SetMetadata({'SOURCE_URL':cfg['custom_url'], 'SOURCE_ZOOM':str(cfg['zoom']),

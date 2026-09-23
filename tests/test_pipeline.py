@@ -32,6 +32,10 @@ class PipelineTests(unittest.TestCase):
         t=mercantile.Tile(1,1,16)
         self.assertNotEqual(common.tile_path(c,t),common.tile_path(self.cfg,t))
 
+    def test_processing_tuning_keeps_artifact_identity(self):
+        changed=dict(self.cfg,processing_threads=12,warp_memory_mb=1024,gdal_cache_mb=1024)
+        self.assertEqual(common.job_config_hash(self.cfg), common.job_config_hash(changed))
+
     def test_corrupt_tile_not_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'tile.png';p.write_text('<html>error</html>')

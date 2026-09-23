@@ -102,6 +102,9 @@ color_mode: palette8
 resampling: average
 proxy: http://127.0.0.1:7897
 max_threads: 8
+processing_threads: 8
+warp_memory_mb: 512
+gdal_cache_mb: 512
 ```
 
 当前输出参数：
@@ -112,6 +115,7 @@ max_threads: 8
 - 色彩：单波段 Byte、256 色共享调色板，带轻度有序抖动；这是 GM 所指的 8-bit Palette Image，不是 RGB 每通道 8 位。
 - 重采样：`average`，重投影后再量化。
 - 压缩：DEFLATE、分块 BigTIFF、内部掩膜和金字塔。
+- GDAL 压制使用 8 个处理线程、512 MiB 重投影内存和 512 MiB 块缓存；这些设置只对新启动的流水线进程生效。正在处理的地区不会在运行中切换线程数。
 
 `resolution: 5` 是输出投影像元尺寸，不代表原始影像定位精度或真实空间分辨率必然达到 5 m。调色板量化有损，DEFLATE 压缩本身无损。
 

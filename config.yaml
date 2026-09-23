@@ -10,6 +10,9 @@ resampling: average
 palette_samples: 262144
 dither_strength: 4
 max_threads: 8
+processing_threads: 8
+warp_memory_mb: 512
+gdal_cache_mb: 512
 retries: 3
 proxy: http://127.0.0.1:7897
 city_shp: city_detailed/3. City/city_wgs84.shp

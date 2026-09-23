@@ -104,4 +104,5 @@ def boundary_hash(df, code):
 
 def job_config_hash(cfg):
     return fingerprint({k: v for k, v in cfg.items() if k not in
-                        ('proxy', 'max_threads', 'retries', 'quark', 'cache_dir', 'output_dir', 'jobs_dir', 'city_shp')})
+                        ('proxy', 'max_threads', 'retries', 'quark', 'cache_dir', 'output_dir', 'jobs_dir', 'city_shp',
+                         'processing_threads', 'warp_memory_mb', 'gdal_cache_mb')})
