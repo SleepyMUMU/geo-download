@@ -164,11 +164,25 @@ def sample_rgb(ds, limit=262144):
     return pixels
 
 def make_palette(pixels):
-    # One optimized 256-color palette for the entire city, not one per tile/block.
+    # Reserve a few colors for rare bright neutral terrain (snow, salt flats).
+    # A city-wide median cut alone can represent it with warm desert colors.
+    values = pixels.astype(np.int16)
+    neutral = (values.mean(axis=1) > 155) & (
+        values.max(axis=1) - values.min(axis=1) < 12)
+    reserve = 16 if neutral.sum() >= 16 else 0
     trained = Image.fromarray(pixels.reshape(-1, 1, 3)).quantize(
-        colors=256, method=Image.Quantize.MEDIANCUT)
+        colors=256-reserve, method=Image.Quantize.MEDIANCUT)
     palette = Image.new('P', (1, 1))
-    palette.putpalette(trained.getpalette())
+    if reserve:
+        highlights = Image.fromarray(pixels[neutral].reshape(-1, 1, 3)).quantize(
+            colors=reserve, method=Image.Quantize.MEDIANCUT)
+        base_colors = trained.getpalette()[:3*(256-reserve)]
+        base_colors += base_colors[-3:] * ((3*(256-reserve)-len(base_colors))//3)
+        neutral_colors = highlights.getpalette()[:3*reserve]
+        neutral_colors += neutral_colors[-3:] * ((3*reserve-len(neutral_colors))//3)
+        palette.putpalette(base_colors + neutral_colors)
+    else:
+        palette.putpalette(trained.getpalette())
     return palette
 
 def map_palette(rgb, palette, x=0, y=0, strength=4):
@@ -204,7 +218,7 @@ def validate_output(path, epsg, expected=None):
         raise RuntimeError('成果尺寸异常')
     return ds
 
-def process(cfg, geom, city, code, work, tiles=None):
+def process(cfg, geom, city, code, work, tiles=None, reference_sha256=None):
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     processing_threads = int(cfg.get('processing_threads', 8))
@@ -217,21 +231,31 @@ def process(cfg, geom, city, code, work, tiles=None):
     gdal.SetCacheMax(gdal_cache_mb * 1024 * 1024)
     print(f'GDAL 处理: {processing_threads} 线程，warp {warp_memory_mb} MiB，缓存 {gdal_cache_mb} MiB', flush=True)
     epsg = common.utm_for(geom)
-    tiles = tiles or common.expected_tiles(geom, cfg['zoom'])
-    vrt = build_mosaic(cfg, tiles, work)
-    from shapely.geometry import mapping
-    cutline = work / 'boundary.geojson'
-    common.write_json(cutline, {'type':'FeatureCollection', 'features':[
-        {'type':'Feature', 'properties':{}, 'geometry':mapping(geom)}]})
     rgb_path = work / 'reference_rgb.tif'
-    options = ['TILED=YES', 'COMPRESS=DEFLATE', 'PREDICTOR=2', 'ZLEVEL=6', 'BIGTIFF=YES',
-               f'NUM_THREADS={processing_threads}']
-    rgb = gdal.Warp(str(rgb_path), str(vrt), options=gdal.WarpOptions(
-        format='GTiff', dstSRS=f'EPSG:{epsg}', xRes=5, yRes=5,
-        targetAlignedPixels=True, resampleAlg='average', outputType=gdal.GDT_Byte,
-        cutlineDSName=str(cutline), cropToCutline=True, dstAlpha=True,
-        creationOptions=options, warpMemoryLimit=warp_memory_mb,
-        warpOptions=[f'NUM_THREADS={processing_threads}'], multithread=True))
+    if reference_sha256 is not None:
+        if not rgb_path.is_file() or common.digest_file(rgb_path) != reference_sha256:
+            raise RuntimeError('RGB 参考影像哈希不符，禁止复用')
+        rgb = gdal.Open(str(rgb_path), gdal.GA_ReadOnly)
+        if rgb is None or rgb.GetSpatialRef().GetAuthorityCode(None) != str(epsg):
+            raise RuntimeError('RGB 参考影像投影不符，禁止复用')
+        transform = rgb.GetGeoTransform()
+        if abs(transform[1]-5)>1e-8 or abs(transform[5]+5)>1e-8 or transform[2] or transform[4]:
+            raise RuntimeError('RGB 参考影像分辨率不符，禁止复用')
+    else:
+        tiles = tiles or common.expected_tiles(geom, cfg['zoom'])
+        vrt = build_mosaic(cfg, tiles, work)
+        from shapely.geometry import mapping
+        cutline = work / 'boundary.geojson'
+        common.write_json(cutline, {'type':'FeatureCollection', 'features':[
+            {'type':'Feature', 'properties':{}, 'geometry':mapping(geom)}]})
+        options = ['TILED=YES', 'COMPRESS=DEFLATE', 'PREDICTOR=2', 'ZLEVEL=6', 'BIGTIFF=YES',
+                   f'NUM_THREADS={processing_threads}']
+        rgb = gdal.Warp(str(rgb_path), str(vrt), options=gdal.WarpOptions(
+            format='GTiff', dstSRS=f'EPSG:{epsg}', xRes=5, yRes=5,
+            targetAlignedPixels=True, resampleAlg='average', outputType=gdal.GDT_Byte,
+            cutlineDSName=str(cutline), cropToCutline=True, dstAlpha=True,
+            creationOptions=options, warpMemoryLimit=warp_memory_mb,
+            warpOptions=[f'NUM_THREADS={processing_threads}'], multithread=True))
     if rgb is None or rgb.RasterCount != 4:
         raise RuntimeError('UTM 重投影失败')
     rgb.FlushCache()

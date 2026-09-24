@@ -68,6 +68,17 @@ class PipelineTests(unittest.TestCase):
                                imagery.map_palette(rgb[:,61:],pal,61,0)],axis=1)
         np.testing.assert_array_equal(full,pieces)
 
+    def test_palette_preserves_rare_bright_neutral_colors(self):
+        rng=np.random.default_rng(7)
+        desert=rng.integers([110,90,60],[225,190,145],size=(20000,3),dtype=np.uint8)
+        snow=np.array([[210,216,217],[225,229,231],[240,242,243],
+                       [250,251,252]],dtype=np.uint8)
+        pixels=np.concatenate([desert,np.repeat(snow,20,axis=0)])
+        palette=imagery.make_palette(pixels)
+        colors=np.array(palette.getpalette(),dtype=np.uint8).reshape(256,3)
+        mapped=colors[imagery.map_palette(snow.reshape(1,-1,3),palette,strength=0)[0]]
+        self.assertLess(np.abs(snow.astype(np.int16)-mapped.astype(np.int16)).mean(),5)
+
     def test_quark_false_success_rejected(self):
         for text,code in [('',0),('not json',0),
             (json.dumps({'type':'result','code':-204,'msg':'failed','data':{}}),0),
@@ -231,5 +242,12 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(artifact['quality']['passed'])
             self.assertTrue(artifact['quality']['full_readback_verified'])
             self.assertEqual(common.digest_file(artifact['path']),artifact['sha256'])
+            reference=Path(tmp)/'work'/'reference_rgb.tif'
+            with self.assertRaisesRegex(RuntimeError,'哈希不符'):
+                imagery.process(cfg,geom,'测试','test',Path(tmp)/'work',
+                                reference_sha256='0'*64)
+            recolored=imagery.process(cfg,geom,'测试','test',Path(tmp)/'work',
+                                      reference_sha256=common.digest_file(reference))
+            self.assertEqual(artifact['sha256'],recolored['sha256'])
 
 if __name__=='__main__':unittest.main(verbosity=2)
