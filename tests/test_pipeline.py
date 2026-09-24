@@ -33,7 +33,8 @@ class PipelineTests(unittest.TestCase):
         self.assertNotEqual(common.tile_path(c,t),common.tile_path(self.cfg,t))
 
     def test_processing_tuning_keeps_artifact_identity(self):
-        changed=dict(self.cfg,processing_threads=12,warp_memory_mb=1024,gdal_cache_mb=1024)
+        changed=dict(self.cfg,processing_threads=12,warp_memory_mb=1024,gdal_cache_mb=1024,
+                     mosaic_driver='vrt')
         self.assertEqual(common.job_config_hash(self.cfg), common.job_config_hash(changed))
 
     def test_corrupt_tile_not_reused(self):
@@ -79,6 +80,36 @@ class PipelineTests(unittest.TestCase):
             geom=box(122.11,37.50,122.112,37.502)
             with self.assertRaises(RuntimeError):
                 imagery.build_vrt(cfg,common.expected_tiles(geom,16),Path(tmp))
+
+    def test_gti_matches_vrt_on_sparse_tiles(self):
+        import mercantile
+        from osgeo import gdal
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            cfg=dict(self.cfg,cache_dir=str(root/'tiles'))
+            tiles=[mercantile.Tile(48497,24045,16),
+                   mercantile.Tile(48498,24045,16),
+                   mercantile.Tile(48497,24046,16)]
+            for i,tile in enumerate(tiles):
+                path=common.tile_path(cfg,tile)
+                path.parent.mkdir(parents=True,exist_ok=True)
+                Image.new('RGB',(256,256),(30+i*30,80+i*20,140+i*10)).save(path)
+            vrt_dir=root/'vrt'; vrt_dir.mkdir()
+            gti_dir=root/'gti'; gti_dir.mkdir()
+            vrt=imagery.build_vrt(cfg,tiles,vrt_dir)
+            gti=imagery.build_gti(cfg,tiles,gti_dir)
+            v=gdal.Open(str(vrt))
+            t=gdal.Open(str(gti))
+            self.assertEqual((v.RasterXSize,v.RasterYSize),(t.RasterXSize,t.RasterYSize))
+            try:
+                np.testing.assert_allclose(v.GetGeoTransform(),t.GetGeoTransform(),atol=1e-8)
+                a=v.ReadAsArray()
+                b=t.ReadAsArray()
+                np.testing.assert_array_equal(a[:3],b[:3])
+                np.testing.assert_array_equal(a[3]>0,t.GetRasterBand(1).GetMaskBand().ReadAsArray()>0)
+            finally:
+                v=None
+                t=None
 
     def test_download_errors_are_not_success(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +171,21 @@ class PipelineTests(unittest.TestCase):
             first.update('652302',下载状态='已下载')
             resumed=xinjiang_batch.Status(tmp,[row])
             self.assertEqual(resumed.rows['652302']['下载状态'],'已下载')
+
+    def test_resume_requires_visual_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work=Path(tmp)
+            result=work/'result.tif'
+            result.write_bytes(b'complete')
+            preview=work/'comparison.png'
+            preview.write_bytes(b'preview')
+            artifact={'path':str(result),'size':result.stat().st_size,
+                      'sha256':common.digest_file(result),'comparisons':[str(preview)]}
+            common.write_json(work/'state.json',{'artifact':artifact})
+            common.write_json(work/'quality.json',{'passed':True,'full_readback_verified':True})
+            self.assertIsNone(xinjiang_batch.valid_existing(work/'state.json'))
+            common.write_json(work/'visual_review.json',{'result':'pass'})
+            self.assertEqual(xinjiang_batch.valid_existing(work/'state.json'),artifact)
 
     def test_cleanup_preserves_tiles_in_pending_area(self):
         import mercantile

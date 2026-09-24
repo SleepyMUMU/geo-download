@@ -12,7 +12,7 @@ import numpy as np
 import requests
 import mercantile
 from PIL import Image
-from osgeo import gdal, osr
+from osgeo import gdal, ogr, osr
 
 def validate_tile(path):
     try:
@@ -72,8 +72,8 @@ def download(cfg, geom):
         raise RuntimeError(f'{len(failures)} 块瓦片失败，禁止拼接。详情: {report}')
     return tiles
 
-def build_vrt(cfg, tiles, work):
-    files = []
+def prepared_tiles(cfg, tiles):
+    """Validate each cached PNG and attach Web Mercator world-file coordinates."""
     for tile in tiles:
         path = common.tile_path(cfg, tile)
         if not validate_tile(path):
@@ -82,7 +82,10 @@ def build_vrt(cfg, tiles, work):
         a, e = (right-left)/256, (bottom-top)/256
         path.with_suffix('.pgw').write_text(
             f'{a:.15f}\n0\n0\n{e:.15f}\n{left+a/2:.15f}\n{top+e/2:.15f}\n', encoding='ascii')
-        files.append(str(path))
+        yield path, (left, bottom, right, top)
+
+def build_vrt(cfg, tiles, work):
+    files = [str(path) for path, _ in prepared_tiles(cfg, tiles)]
     vrt = work / 'mosaic.vrt'
     ds = gdal.BuildVRT(str(vrt), files, options=gdal.BuildVRTOptions(
         outputSRS='EPSG:3857', addAlpha=True, strict=True))
@@ -90,6 +93,64 @@ def build_vrt(cfg, tiles, work):
         raise RuntimeError('VRT 构建失败')
     ds = None
     return vrt
+
+def build_gti(cfg, tiles, work):
+    """Build a spatially indexed GTI mosaic for very large XYZ tile sets."""
+    if gdal.GetDriverByName('GTI') is None:
+        raise RuntimeError('当前 GDAL 未提供 GTI 驱动')
+    index = Path(work) / 'mosaic.gti.gpkg'
+    partial = index.with_name('mosaic.partial.gti.gpkg')
+    if partial.exists():
+        partial.unlink()
+    ds = ogr.GetDriverByName('GPKG').CreateDataSource(str(partial))
+    if ds is None:
+        raise RuntimeError('GTI 索引创建失败')
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(3857)
+    layer = ds.CreateLayer('tiles', srs=srs, geom_type=ogr.wkbPolygon,
+                           options=['SPATIAL_INDEX=YES'])
+    layer.CreateField(ogr.FieldDefn('location', ogr.OFTString))
+    resolution = 2 * math.pi * 6378137 / (2 ** int(cfg['zoom']) * 256)
+    for key, value in {'RESX': resolution, 'RESY': resolution,
+                       'BAND_COUNT': 3, 'DATA_TYPE': 'Byte',
+                       'COLOR_INTERPRETATION': 'red,green,blue',
+                       'MASK_BAND': 'YES'}.items():
+        layer.SetMetadataItem(key, str(value))
+    try:
+        layer.StartTransaction()
+        for count, (path, (left, bottom, right, top)) in enumerate(prepared_tiles(cfg, tiles), 1):
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            for x, y in ((left, bottom), (right, bottom), (right, top),
+                         (left, top), (left, bottom)):
+                ring.AddPoint_2D(x, y)
+            polygon = ogr.Geometry(ogr.wkbPolygon)
+            polygon.AddGeometry(ring)
+            feature = ogr.Feature(layer.GetLayerDefn())
+            feature.SetGeometry(polygon)
+            feature.SetField('location', str(path))
+            if layer.CreateFeature(feature) != ogr.OGRERR_NONE:
+                raise RuntimeError(f'GTI 索引写入失败: {path}')
+            feature = None
+            if count % 5000 == 0:
+                layer.CommitTransaction()
+                layer.StartTransaction()
+        layer.CommitTransaction()
+    finally:
+        ds = None
+    os.replace(partial, index)
+    mosaic = gdal.OpenEx(str(index), gdal.OF_RASTER, allowed_drivers=['GTI'])
+    if mosaic is None or mosaic.RasterCount != 3:
+        raise RuntimeError('GTI 索引回读失败')
+    mosaic = None
+    return index
+
+def build_mosaic(cfg, tiles, work):
+    driver = cfg.get('mosaic_driver', 'vrt').lower()
+    if driver == 'gti':
+        return build_gti(cfg, tiles, work)
+    if driver == 'vrt':
+        return build_vrt(cfg, tiles, work)
+    raise ValueError(f'不支持的拼接驱动: {driver}')
 
 def sample_rgb(ds, limit=262144):
     # Spatially distributed, bounded-memory training set; no full-city palette search.
@@ -157,7 +218,7 @@ def process(cfg, geom, city, code, work, tiles=None):
     print(f'GDAL 处理: {processing_threads} 线程，warp {warp_memory_mb} MiB，缓存 {gdal_cache_mb} MiB', flush=True)
     epsg = common.utm_for(geom)
     tiles = tiles or common.expected_tiles(geom, cfg['zoom'])
-    vrt = build_vrt(cfg, tiles, work)
+    vrt = build_mosaic(cfg, tiles, work)
     from shapely.geometry import mapping
     cutline = work / 'boundary.geojson'
     common.write_json(cutline, {'type':'FeatureCollection', 'features':[

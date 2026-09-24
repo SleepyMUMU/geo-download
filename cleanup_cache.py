@@ -55,7 +55,7 @@ def cleanup_once(cfg, batch, geoms, rows, dry_run=False, intermediates_only=Fals
     removed_tiles=0
     for code in sorted(eligible):
         work=batch/code
-        for name in ('reference_rgb.tif','mosaic.vrt'):
+        for name in ('reference_rgb.tif','mosaic.vrt','mosaic.gti.gpkg'):
             path=work/name
             if path.is_file():
                 size=path.stat().st_size

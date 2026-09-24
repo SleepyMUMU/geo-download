@@ -13,6 +13,7 @@ max_threads: 8
 processing_threads: 16
 warp_memory_mb: 1024
 gdal_cache_mb: 1024
+mosaic_driver: gti
 retries: 3
 proxy: http://127.0.0.1:7897
 city_shp: city_detailed/3. City/city_wgs84.shp

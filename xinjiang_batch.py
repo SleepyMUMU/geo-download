@@ -106,8 +106,10 @@ def valid_existing(state_path):
         work=state_path.parent
         quality_path=work/'quality.json'
         quality=json.loads(quality_path.read_text(encoding='utf-8'))
+        review=json.loads((work/'visual_review.json').read_text(encoding='utf-8'))
         comparisons=artifact.get('comparisons',[]) if artifact else []
         if (artifact and quality.get('passed') is True and quality.get('full_readback_verified') is True
+                and review.get('result') == 'pass'
                 and comparisons and all(Path(p).is_file() for p in comparisons)
                 and Path(artifact['path']).exists()
                 and Path(artifact['path']).stat().st_size==artifact['size']
