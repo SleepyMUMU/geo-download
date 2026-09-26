@@ -79,6 +79,16 @@ class PipelineTests(unittest.TestCase):
         mapped=colors[imagery.map_palette(snow.reshape(1,-1,3),palette,strength=0)[0]]
         self.assertLess(np.abs(snow.astype(np.int16)-mapped.astype(np.int16)).mean(),5)
 
+    def test_palette_preserves_rare_blue_ice(self):
+        rng=np.random.default_rng(8)
+        desert=rng.integers([110,90,60],[225,190,145],size=(20000,3),dtype=np.uint8)
+        ice=np.array([[60,100,142],[82,120,165],[110,150,190]],dtype=np.uint8)
+        pixels=np.concatenate([desert,np.repeat(ice,40,axis=0)])
+        palette=imagery.make_palette(pixels)
+        colors=np.array(palette.getpalette(),dtype=np.uint8).reshape(256,3)
+        mapped=colors[imagery.map_palette(ice.reshape(1,-1,3),palette,strength=0)[0]]
+        self.assertLess(np.abs(ice.astype(np.int16)-mapped.astype(np.int16)).mean(),8)
+
     def test_quark_false_success_rejected(self):
         for text,code in [('',0),('not json',0),
             (json.dumps({'type':'result','code':-204,'msg':'failed','data':{}}),0),
@@ -236,11 +246,16 @@ class PipelineTests(unittest.TestCase):
                 p=common.tile_path(cfg,tile);p.parent.mkdir(parents=True,exist_ok=True)
                 yy,xx=np.mgrid[:256,:256]
                 rgb=np.stack([80+xx//4,80+yy//4,60+(xx+yy)//8],axis=-1).astype(np.uint8)
+                rgb[:64,:64]=[45,88,135]
                 Image.fromarray(rgb).save(p)
             artifact=imagery.process(cfg,geom,'测试','test',Path(tmp)/'work',tiles)
             self.assertEqual(artifact['epsg'],32651)
             self.assertTrue(artifact['quality']['passed'])
             self.assertTrue(artifact['quality']['full_readback_verified'])
+            self.assertGreater(artifact['quality']['cool_region_pixels'],0)
+            self.assertIsInstance(artifact['quality']['passed'],bool)
+            self.assertIsInstance(artifact['quality']['cool_region_mae_dn'],float)
+            self.assertTrue(json.loads((Path(tmp)/'work'/'quality.json').read_text(encoding='utf-8'))['passed'])
             self.assertEqual(common.digest_file(artifact['path']),artifact['sha256'])
             reference=Path(tmp)/'work'/'reference_rgb.tif'
             with self.assertRaisesRegex(RuntimeError,'哈希不符'):

@@ -164,25 +164,30 @@ def sample_rgb(ds, limit=262144):
     return pixels
 
 def make_palette(pixels):
-    # Reserve a few colors for rare bright neutral terrain (snow, salt flats).
-    # A city-wide median cut alone can represent it with warm desert colors.
+    # A city-wide median cut can lose rare snow and blue ice among desert pixels.
     values = pixels.astype(np.int16)
     neutral = (values.mean(axis=1) > 155) & (
         values.max(axis=1) - values.min(axis=1) < 12)
-    reserve = 16 if neutral.sum() >= 16 else 0
-    trained = Image.fromarray(pixels.reshape(-1, 1, 3)).quantize(
-        colors=256-reserve, method=Image.Quantize.MEDIANCUT)
+    cool = ((values[:, 2] > values[:, 0] + 15)
+            & (values[:, 2] > values[:, 1] + 8)
+            & (values.mean(axis=1) > 35))
+    neutral_slots = 16 if neutral.sum() >= 16 else 0
+    cool_slots = 32 if cool.sum() >= 64 else 0
+
+    def trained_colors(values, slots):
+        trained = Image.fromarray(values.reshape(-1, 1, 3)).quantize(
+            colors=slots, method=Image.Quantize.MEDIANCUT)
+        colors = trained.getpalette()[:3 * slots]
+        return colors + colors[-3:] * ((3 * slots - len(colors)) // 3)
+
+    base_slots = 256 - neutral_slots - cool_slots
+    colors = trained_colors(pixels, base_slots)
+    if neutral_slots:
+        colors += trained_colors(pixels[neutral], neutral_slots)
+    if cool_slots:
+        colors += trained_colors(pixels[cool], cool_slots)
     palette = Image.new('P', (1, 1))
-    if reserve:
-        highlights = Image.fromarray(pixels[neutral].reshape(-1, 1, 3)).quantize(
-            colors=reserve, method=Image.Quantize.MEDIANCUT)
-        base_colors = trained.getpalette()[:3*(256-reserve)]
-        base_colors += base_colors[-3:] * ((3*(256-reserve)-len(base_colors))//3)
-        neutral_colors = highlights.getpalette()[:3*reserve]
-        neutral_colors += neutral_colors[-3:] * ((3*reserve-len(neutral_colors))//3)
-        palette.putpalette(base_colors + neutral_colors)
-    else:
-        palette.putpalette(trained.getpalette())
+    palette.putpalette(colors)
     return palette
 
 def map_palette(rgb, palette, x=0, y=0, strength=4):
@@ -287,6 +292,8 @@ def process(cfg, geom, city, code, work, tiles=None, reference_sha256=None):
     abs_sum = 0.0
     n = 0
     valid_count = 0
+    cool_abs_sum = 0.0
+    cool_channels = 0
     histogram = np.zeros(256, dtype=np.int64)
     block = 512
     for y in range(0, rgb.RasterYSize, block):
@@ -299,6 +306,11 @@ def process(cfg, geom, city, code, work, tiles=None, reference_sha256=None):
             band.WriteArray(indexed, x, y)
             mask.WriteArray(valid.astype(np.uint8)*255, x, y)
             diff = colors[indexed][valid].astype(np.int16) - original[valid].astype(np.int16)
+            source = original.astype(np.int16)
+            cool = valid & (source[:, :, 2] > source[:, :, 0] + 15) & (source[:, :, 2] > source[:, :, 1] + 8) & (source.mean(axis=2) > 35)
+            if np.any(cool):
+                cool_abs_sum += float(np.abs(colors[indexed][cool].astype(np.int16) - source[cool]).sum())
+                cool_channels += int(cool.sum()) * 3
             sq += np.square(diff.astype(np.float64)).sum()
             abs_sum += np.abs(diff).sum()
             n += diff.size
@@ -327,9 +339,12 @@ def process(cfg, geom, city, code, work, tiles=None, reference_sha256=None):
                 raise RuntimeError('写盘回读掩膜不一致')
     checked = None
     quality = {'mae_dn':mae, 'rmse_dn':rmse, 'p99_abs_dn':p99,
+               'cool_region_mae_dn':float(cool_abs_sum / cool_channels) if cool_channels else None,
+               'cool_region_pixels':cool_channels // 3,
                'valid_pixels':valid_count, 'full_readback_verified':True,
                'thresholds':cfg['quality'], 'visual_approval_required':True}
-    quality['passed'] = mae <= cfg['quality']['max_mae_dn'] and p99 <= cfg['quality']['max_p99_dn']
+    quality['passed'] = bool(mae <= cfg['quality']['max_mae_dn'] and p99 <= cfg['quality']['max_p99_dn']
+                             and (not cool_channels or quality['cool_region_mae_dn'] <= 8))
     common.write_json(work/'quality.json', quality)
     # Full resolution center and distributed crops; index values are never averaged.
     w,h=min(768,rgb.RasterXSize),min(768,rgb.RasterYSize)

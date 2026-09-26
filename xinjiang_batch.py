@@ -181,6 +181,11 @@ def main():
                         status.update(code,压制状态='已压制（质检通过）')
                     except Exception as exc:
                         status.update(code,压制状态='失败',上传状态='跳过',备注=str(exc).replace('|','/')[:180]); continue
+                # Newly processed imagery must be visually reviewed before upload.
+                # valid_existing already checks this for resumed artifacts.
+                if valid_existing(work/'state.json') is None:
+                    status.update(code,上传状态='等待视觉复核',备注='检查全部对照图并记录 visual_review.json 后续跑')
+                    continue
                 status.update(code,上传状态='排队')
                 upload_futures.append(upload_pool.submit(upload_one,job,artifact,work))
         upload_pool.shutdown(wait=True)
