@@ -3,6 +3,7 @@ import geo_common as common
 import io
 import math
 import os
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -106,8 +107,15 @@ def build_gti(cfg, tiles, work):
         layer = source.GetLayerByName('tiles') if source else None
         if layer is None:
             raise RuntimeError(f'GTI 索引图层缺失，保留文件: {path}')
-        count = layer.GetFeatureCount()
-        if count < 0 or count > len(tiles):
+        # GeoPackage's cached feature_count can remain zero after interruption
+        # even when committed tiles are present. Query the actual table rows.
+        db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        try:
+            count, minimum, maximum = db.execute(
+                'SELECT COUNT(*), MIN(fid), MAX(fid) FROM tiles').fetchone()
+        finally:
+            db.close()
+        if count < 0 or count > len(tiles) or (count and (minimum != 1 or maximum != count)):
             raise RuntimeError(f'GTI 索引进度不可信，保留文件: {path}')
         if (layer.GetMetadataItem('BAND_COUNT') != '3'
                 or layer.GetMetadataItem('MASK_BAND') != 'YES'):
@@ -172,7 +180,14 @@ def build_gti(cfg, tiles, work):
                 layer.StartTransaction()
         layer.CommitTransaction()
     finally:
-        ds = None
+        layer = ds = None
+    db = sqlite3.connect(partial)
+    try:
+        db.execute('UPDATE gpkg_ogr_contents SET feature_count=? WHERE table_name=?',
+                   (len(tiles), 'tiles'))
+        db.commit()
+    finally:
+        db.close()
     os.replace(partial, index)
     mosaic = gdal.OpenEx(str(index), gdal.OF_RASTER, allowed_drivers=['GTI'])
     if mosaic is None or mosaic.RasterCount != 3:

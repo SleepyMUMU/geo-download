@@ -153,6 +153,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_gti_resumes_verified_partial_index(self):
         import mercantile
+        import sqlite3
         from osgeo import ogr
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
@@ -168,6 +169,15 @@ class PipelineTests(unittest.TestCase):
             ds=ogr.Open(str(partial),1)
             layer=ds.GetLayerByName('tiles')
             self.assertEqual(layer.DeleteFeature(3),ogr.OGRERR_NONE)
+            ds=None
+            db=sqlite3.connect(partial)
+            try:
+                db.execute("UPDATE gpkg_ogr_contents SET feature_count=0 WHERE table_name='tiles'")
+                db.commit()
+            finally:
+                db.close()
+            ds=ogr.Open(str(partial))
+            self.assertEqual(ds.GetLayerByName('tiles').GetFeatureCount(),0)
             ds=None
             resumed=imagery.build_gti(cfg,tiles,root)
             ds=ogr.Open(str(resumed))
