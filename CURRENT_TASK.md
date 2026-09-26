@@ -13,6 +13,12 @@
 
 ## 当前暂停点（2026-09-26 16:35 更新）
 
+### 2026-09-27 约 05:55：若羌上传中
+
+- 若羌 `652824` 唯一处理 PID `39524` 正常完成并退出，锁已释放。7,070,813,611 字节最终 TIFF 的 SHA-256 为 `45d49ac237798a85ff5005fbe385e9b75def8aea875933cac4ece56fe5999bce`，重算一致；全图质量 MAE 2.918、P99 13、蓝青区 MAE 4.599，全图回读通过。单波段 Byte/256 色、5 m、UTM 32645、DEFLATE、内部掩膜及金字塔均核验。
+- 实际查看全部 `comparison.png`、`comparison_2.png`、`comparison_3.png`，`visual_review.json` 已记 pass；官方夸克 fresh browse 确认新疆文件夹无该准确文件名。
+- 官方 Skill 已在可识别 Agent 前台启动唯一上传：PTY session `93232`，启动时 Python PID `47408`、Quark node PID `47764`。上传过程中绝不重复上传；结束后检查 `upload_receipt.json` 并独立 fresh listing 核 FID、准确名和大小。全部 26 县验收后且无作业时才可关机。监控提示以实时进程为准。
+
 ### 2026-09-26 深夜若羌 GTI 修复
 
 - 若羌处理 PID `17088` 在索引续写到 882301 条后意外退出；未上传，也没有合格最终 TIFF。原 `reference_rgb.tif` 只有 16 字节，已另存为 `reference_rgb.incomplete-16bytes.tif`。旧锁已在确认进程不存在后清理。
