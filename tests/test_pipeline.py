@@ -99,6 +99,15 @@ class PipelineTests(unittest.TestCase):
         mapped=colors[imagery.map_palette(ice.reshape(1,-1,3),palette,strength=0)[0]]
         self.assertLess(np.abs(ice.astype(np.int16)-mapped.astype(np.int16)).mean(),8)
 
+    def test_sparse_cool_training_expands_sample(self):
+        desert=np.tile(np.array([[130,110,80]],dtype=np.uint8),(100,1))
+        ice=np.tile(np.array([[60,100,150]],dtype=np.uint8),(11,1))
+        first=np.concatenate([desert,ice])
+        second=np.concatenate([desert,np.tile(ice,(8,1))])
+        with patch('imagery.sample_rgb',side_effect=[first,second]) as sample:
+            self.assertIs(imagery.palette_pixels(None,262144),second)
+        self.assertEqual([call.args[1] for call in sample.call_args_list],[262144,1048576])
+
     def test_quark_false_success_rejected(self):
         for text,code in [('',0),('not json',0),
             (json.dumps({'type':'result','code':-204,'msg':'failed','data':{}}),0),

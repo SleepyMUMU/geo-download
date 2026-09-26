@@ -199,6 +199,20 @@ def sample_rgb(ds, limit=262144):
         raise RuntimeError('重投影结果没有有效像元')
     return pixels
 
+def palette_pixels(ds, limit=262144):
+    """Expand sparse cool-color samples before training the shared palette."""
+    limit = int(limit)
+    while True:
+        pixels = sample_rgb(ds, limit)
+        values = pixels.astype(np.int16)
+        cool = ((values[:, 2] > values[:, 0] + 15)
+                & (values[:, 2] > values[:, 1] + 8)
+                & (values.mean(axis=1) > 35))
+        count = int(cool.sum())
+        if count == 0 or count >= 64 or limit >= 4194304:
+            return pixels
+        limit = min(limit * 4, 4194304)
+
 def make_palette(pixels):
     # A city-wide median cut can lose rare snow and blue ice among desert pixels.
     values = pixels.astype(np.int16)
@@ -303,7 +317,7 @@ def process(cfg, geom, city, code, work, tiles=None, reference_sha256=None):
     if rgb is None or rgb.RasterCount != 4:
         raise RuntimeError('UTM 重投影失败')
     rgb.FlushCache()
-    pixels = sample_rgb(rgb, cfg.get('palette_samples', 262144))
+    pixels = palette_pixels(rgb, cfg.get('palette_samples', 262144))
     palette = make_palette(pixels)
     colors = np.array(palette.getpalette(), dtype=np.uint8).reshape(256, 3)
     version = common.fingerprint({'config':common.job_config_hash(cfg),'boundary':geom.wkb_hex})[:16]
