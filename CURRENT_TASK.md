@@ -15,6 +15,12 @@
 
 ### 2026-09-26 约 20:00 的最新增量
 
+### 2026-09-26 20:52 的若羌恢复
+
+- 唯一主线 PID `3344` 退出后，若羌 `652824` 失败：`UNIQUE constraint failed: tiles.fid`。根因是中断的 GeoPackage 实际保留 815000 个已提交瓦片索引，但 `gpkg_ogr_contents.feature_count` 缓存错误地为 0；原代码按 OGR 缓存计数从第 1 条重写。索引原件和备份均未删除。
+- 已修改 `imagery.build_gti` 使用 SQLite 实际表行数、最小/最大 FID 和样本路径校验续写进度，完成后修正缓存计数。`sat` 全套 24 项测试通过，提交 `2131cbe` 已推送。
+- 确认旧主线、上传及修复进程全退出且 `pipeline.lock` 不存在后，启动**唯一若羌处理进程 PID `17088`**，它复用项目 `download`/`process` 和主锁，但只处理影像、**不执行夸克上传**，故可隐藏后台持续运行。锁应为 `17088`，日志 `jobs/process_ruoqiang.stdout.log` 与 `.stderr.log`。若它仍运行只监控，不启动主线或第二处理进程。完成后必须逐项检查 quality、全部 comparison 并实际目视、visual_review、本地 SHA，然后在 Agent 前台用官方 Skill 上传并 fresh cloud listing 核 FID/准确名/大小；本地最终文件保留。只有全部26县完成且无作业时才可关机。
+
 - **25/26 县**本地和夸克已核验：沙雅 `652924` 修复版全图 MAE 2.766、蓝青区 MAE 6.775，通过目视、规格与 SHA；官方 Skill 前台上传并 fresh listing 核 FID/准确名/大小。所有最终本地文件保留。
 - 确认旧主线 PID `10228`、修复和上传进程全部退出后，已清陈旧 `pipeline.lock`，从原文件范围和 session 在 Agent 前台启动唯一主线 **PID `3344`**，锁写 `3344`。当前剩余若羌 `652824`，该县部分 GTI 已有 815000/882301 条可核对续写。主线还活着时只监控，绝不启动第二条。
 
