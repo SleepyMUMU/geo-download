@@ -173,6 +173,7 @@ class PipelineTests(unittest.TestCase):
             db=sqlite3.connect(partial)
             try:
                 db.execute("UPDATE gpkg_ogr_contents SET feature_count=0 WHERE table_name='tiles'")
+                db.execute("UPDATE gpkg_contents SET min_x=max_x WHERE table_name='tiles'")
                 db.commit()
             finally:
                 db.close()
@@ -185,7 +186,48 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(layer.GetFeatureCount(),3)
             self.assertEqual(layer.GetFeature(3).GetField('location'),str(common.tile_path(cfg,tiles[2])))
             ds=None
+            db=sqlite3.connect(resumed)
+            try:
+                bounds=db.execute("SELECT min_x,max_x FROM gpkg_contents WHERE table_name='tiles'").fetchone()
+                self.assertLess(bounds[0],bounds[1])
+                self.assertIsNotNone(db.execute(
+                    "SELECT name FROM sqlite_master WHERE name='rtree_tiles_geom'").fetchone())
+            finally:
+                db.close()
             self.assertFalse(partial.exists())
+
+    def test_gti_repairs_completed_index_metadata(self):
+        import mercantile
+        import sqlite3
+        from osgeo import ogr
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            cfg=dict(self.cfg,cache_dir=str(root/'tiles'))
+            tiles=[mercantile.Tile(48497+i,24045,16) for i in range(3)]
+            for tile in tiles:
+                path=common.tile_path(cfg,tile)
+                path.parent.mkdir(parents=True,exist_ok=True)
+                Image.new('RGB',(256,256),(30,80,140)).save(path)
+            index=imagery.build_gti(cfg,tiles,root)
+            ds=ogr.Open(str(index),1)
+            result=ds.ExecuteSQL("SELECT DisableSpatialIndex('tiles','geom')")
+            if result:
+                ds.ReleaseResultSet(result)
+            ds=None
+            db=sqlite3.connect(index)
+            try:
+                db.execute("UPDATE gpkg_contents SET min_x=max_x WHERE table_name='tiles'")
+                db.commit()
+            finally:
+                db.close()
+            imagery.build_gti(cfg,tiles,root)
+            db=sqlite3.connect(index)
+            try:
+                bounds=db.execute("SELECT min_x,max_x FROM gpkg_contents WHERE table_name='tiles'").fetchone()
+                self.assertLess(bounds[0],bounds[1])
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM rtree_tiles_geom').fetchone()[0],3)
+            finally:
+                db.close()
 
     def test_download_errors_are_not_success(self):
         with tempfile.TemporaryDirectory() as tmp:

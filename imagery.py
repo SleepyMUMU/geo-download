@@ -102,6 +102,55 @@ def build_gti(cfg, tiles, work):
     index = Path(work) / 'mosaic.gti.gpkg'
     partial = index.with_name('mosaic.partial.gti.gpkg')
 
+    def finalize_index(path):
+        # An interrupted GeoPackage can retain every feature while losing its
+        # spatial index and keeping only the extent of the last append batch.
+        # GTI trusts that extent, so a mere feature-count check is insufficient.
+        source = ogr.Open(str(path), 1)
+        if source is None:
+            raise RuntimeError(f'GTI 索引无法更新，保留文件: {path}')
+        try:
+            result = source.ExecuteSQL("SELECT HasSpatialIndex('tiles','geom')")
+            has_index = result.GetNextFeature().GetField(0) if result else 0
+            if result:
+                source.ReleaseResultSet(result)
+            if not has_index:
+                print('GTI 重建空间索引', flush=True)
+                result = source.ExecuteSQL("SELECT CreateSpatialIndex('tiles','geom')")
+                if result:
+                    source.ReleaseResultSet(result)
+                result = source.ExecuteSQL("SELECT HasSpatialIndex('tiles','geom')")
+                has_index = result.GetNextFeature().GetField(0) if result else 0
+                if result:
+                    source.ReleaseResultSet(result)
+                if not has_index:
+                    raise RuntimeError(f'GTI 空间索引重建失败，保留文件: {path}')
+        finally:
+            source = None
+        left = mercantile.xy_bounds(min(tiles, key=lambda t: t.x)).left
+        right = mercantile.xy_bounds(max(tiles, key=lambda t: t.x)).right
+        bottom = mercantile.xy_bounds(max(tiles, key=lambda t: t.y)).bottom
+        top = mercantile.xy_bounds(min(tiles, key=lambda t: t.y)).top
+        db = sqlite3.connect(path)
+        try:
+            db.execute('UPDATE gpkg_contents SET min_x=?, min_y=?, max_x=?, max_y=? WHERE table_name=?',
+                       (left, bottom, right, top, 'tiles'))
+            db.execute('UPDATE gpkg_ogr_contents SET feature_count=? WHERE table_name=?',
+                       (len(tiles), 'tiles'))
+            db.commit()
+        finally:
+            db.close()
+        mosaic = gdal.OpenEx(str(path), gdal.OF_RASTER, allowed_drivers=['GTI'])
+        if mosaic is None or mosaic.RasterCount != 3:
+            raise RuntimeError(f'GTI 索引回读失败，保留文件: {path}')
+        gt = mosaic.GetGeoTransform()
+        actual = (gt[0], gt[3] + mosaic.RasterYSize * gt[5],
+                  gt[0] + mosaic.RasterXSize * gt[1], gt[3])
+        mosaic = None
+        resolution = 2 * math.pi * 6378137 / (2 ** int(cfg['zoom']) * 256)
+        if any(abs(a-b) > resolution * 1.01 for a, b in zip(actual, (left, bottom, right, top))):
+            raise RuntimeError(f'GTI 范围不完整，保留文件: {path}: {actual}')
+
     def checked_layer(path, update=False):
         source = ogr.Open(str(path), int(update))
         layer = source.GetLayerByName('tiles') if source else None
@@ -132,10 +181,7 @@ def build_gti(cfg, tiles, work):
         source = layer = None
         if count != len(tiles):
             raise RuntimeError(f'GTI 已完成索引条目不足，保留文件: {index}')
-        mosaic = gdal.OpenEx(str(index), gdal.OF_RASTER, allowed_drivers=['GTI'])
-        if mosaic is None or mosaic.RasterCount != 3:
-            raise RuntimeError(f'GTI 已完成索引回读失败，保留文件: {index}')
-        mosaic = None
+        finalize_index(index)
         return index
 
     if partial.exists():
@@ -181,18 +227,8 @@ def build_gti(cfg, tiles, work):
         layer.CommitTransaction()
     finally:
         layer = ds = None
-    db = sqlite3.connect(partial)
-    try:
-        db.execute('UPDATE gpkg_ogr_contents SET feature_count=? WHERE table_name=?',
-                   (len(tiles), 'tiles'))
-        db.commit()
-    finally:
-        db.close()
+    finalize_index(partial)
     os.replace(partial, index)
-    mosaic = gdal.OpenEx(str(index), gdal.OF_RASTER, allowed_drivers=['GTI'])
-    if mosaic is None or mosaic.RasterCount != 3:
-        raise RuntimeError('GTI 索引回读失败')
-    mosaic = None
     return index
 
 def build_mosaic(cfg, tiles, work):
