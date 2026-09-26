@@ -100,25 +100,60 @@ def build_gti(cfg, tiles, work):
         raise RuntimeError('当前 GDAL 未提供 GTI 驱动')
     index = Path(work) / 'mosaic.gti.gpkg'
     partial = index.with_name('mosaic.partial.gti.gpkg')
+
+    def checked_layer(path, update=False):
+        source = ogr.Open(str(path), int(update))
+        layer = source.GetLayerByName('tiles') if source else None
+        if layer is None:
+            raise RuntimeError(f'GTI 索引图层缺失，保留文件: {path}')
+        count = layer.GetFeatureCount()
+        if count < 0 or count > len(tiles):
+            raise RuntimeError(f'GTI 索引进度不可信，保留文件: {path}')
+        if (layer.GetMetadataItem('BAND_COUNT') != '3'
+                or layer.GetMetadataItem('MASK_BAND') != 'YES'):
+            raise RuntimeError(f'GTI 索引元数据不符，保留文件: {path}')
+        for fid in sorted({1, count // 4, count // 2, count * 3 // 4, count} - {0} if count else ()):
+            feature = layer.GetFeature(fid)
+            expected = str(common.tile_path(cfg, tiles[fid-1]))
+            if feature is None or feature.GetField('location') != expected:
+                raise RuntimeError(f'GTI 索引与本次瓦片清单不符，保留文件: {path}')
+        return source, layer, count
+
+    if index.exists():
+        source, layer, count = checked_layer(index)
+        source = layer = None
+        if count != len(tiles):
+            raise RuntimeError(f'GTI 已完成索引条目不足，保留文件: {index}')
+        mosaic = gdal.OpenEx(str(index), gdal.OF_RASTER, allowed_drivers=['GTI'])
+        if mosaic is None or mosaic.RasterCount != 3:
+            raise RuntimeError(f'GTI 已完成索引回读失败，保留文件: {index}')
+        mosaic = None
+        return index
+
     if partial.exists():
-        partial.unlink()
-    ds = ogr.GetDriverByName('GPKG').CreateDataSource(str(partial))
+        ds, layer, start = checked_layer(partial, update=True)
+        print(f'GTI 索引续写 {start}/{len(tiles)} 条', flush=True)
+    else:
+        start = 0
+        ds = ogr.GetDriverByName('GPKG').CreateDataSource(str(partial))
+        if ds is None:
+            raise RuntimeError('GTI 索引创建失败')
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(3857)
+        layer = ds.CreateLayer('tiles', srs=srs, geom_type=ogr.wkbPolygon,
+                               options=['SPATIAL_INDEX=YES'])
+        layer.CreateField(ogr.FieldDefn('location', ogr.OFTString))
+        resolution = 2 * math.pi * 6378137 / (2 ** int(cfg['zoom']) * 256)
+        for key, value in {'RESX': resolution, 'RESY': resolution,
+                           'BAND_COUNT': 3, 'DATA_TYPE': 'Byte',
+                           'COLOR_INTERPRETATION': 'red,green,blue',
+                           'MASK_BAND': 'YES'}.items():
+            layer.SetMetadataItem(key, str(value))
     if ds is None:
         raise RuntimeError('GTI 索引创建失败')
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(3857)
-    layer = ds.CreateLayer('tiles', srs=srs, geom_type=ogr.wkbPolygon,
-                           options=['SPATIAL_INDEX=YES'])
-    layer.CreateField(ogr.FieldDefn('location', ogr.OFTString))
-    resolution = 2 * math.pi * 6378137 / (2 ** int(cfg['zoom']) * 256)
-    for key, value in {'RESX': resolution, 'RESY': resolution,
-                       'BAND_COUNT': 3, 'DATA_TYPE': 'Byte',
-                       'COLOR_INTERPRETATION': 'red,green,blue',
-                       'MASK_BAND': 'YES'}.items():
-        layer.SetMetadataItem(key, str(value))
     try:
         layer.StartTransaction()
-        for count, (path, (left, bottom, right, top)) in enumerate(prepared_tiles(cfg, tiles), 1):
+        for count, (path, (left, bottom, right, top)) in enumerate(prepared_tiles(cfg, tiles[start:]), start+1):
             ring = ogr.Geometry(ogr.wkbLinearRing)
             for x, y in ((left, bottom), (right, bottom), (right, top),
                          (left, top), (left, bottom)):
@@ -126,6 +161,7 @@ def build_gti(cfg, tiles, work):
             polygon = ogr.Geometry(ogr.wkbPolygon)
             polygon.AddGeometry(ring)
             feature = ogr.Feature(layer.GetLayerDefn())
+            feature.SetFID(count)
             feature.SetGeometry(polygon)
             feature.SetField('location', str(path))
             if layer.CreateFeature(feature) != ogr.OGRERR_NONE:
@@ -172,7 +208,10 @@ def make_palette(pixels):
             & (values[:, 2] > values[:, 1] + 8)
             & (values.mean(axis=1) > 35))
     neutral_slots = 16 if neutral.sum() >= 16 else 0
-    cool_slots = 32 if cool.sum() >= 64 else 0
+    # Very sparse blue pixels can still cover tens of thousands of pixels in a
+    # large county. Reserve only as many colors as the sample can train.
+    cool_count = int(cool.sum())
+    cool_slots = min(32, max(8, cool_count)) if cool_count >= 8 else 0
 
     def trained_colors(values, slots):
         trained = Image.fromarray(values.reshape(-1, 1, 3)).quantize(

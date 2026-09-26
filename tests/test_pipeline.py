@@ -89,6 +89,16 @@ class PipelineTests(unittest.TestCase):
         mapped=colors[imagery.map_palette(ice.reshape(1,-1,3),palette,strength=0)[0]]
         self.assertLess(np.abs(ice.astype(np.int16)-mapped.astype(np.int16)).mean(),8)
 
+    def test_palette_preserves_very_sparse_cool_pixels(self):
+        rng=np.random.default_rng(18)
+        desert=rng.integers([110,90,60],[225,190,120],size=(20000,3),dtype=np.uint8)
+        ice=np.array([[30,55,80],[65,105,150],[90,130,175],[120,155,190]],dtype=np.uint8)
+        pixels=np.concatenate([desert,np.repeat(ice,[3,3,3,2],axis=0)])
+        palette=imagery.make_palette(pixels)
+        colors=np.array(palette.getpalette(),dtype=np.uint8).reshape(256,3)
+        mapped=colors[imagery.map_palette(ice.reshape(1,-1,3),palette,strength=0)[0]]
+        self.assertLess(np.abs(ice.astype(np.int16)-mapped.astype(np.int16)).mean(),8)
+
     def test_quark_false_success_rejected(self):
         for text,code in [('',0),('not json',0),
             (json.dumps({'type':'result','code':-204,'msg':'failed','data':{}}),0),
@@ -131,6 +141,32 @@ class PipelineTests(unittest.TestCase):
             finally:
                 v=None
                 t=None
+
+    def test_gti_resumes_verified_partial_index(self):
+        import mercantile
+        from osgeo import ogr
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            cfg=dict(self.cfg,cache_dir=str(root/'tiles'))
+            tiles=[mercantile.Tile(48497+i,24045,16) for i in range(3)]
+            for i,tile in enumerate(tiles):
+                path=common.tile_path(cfg,tile)
+                path.parent.mkdir(parents=True,exist_ok=True)
+                Image.new('RGB',(256,256),(30+i,80,140)).save(path)
+            index=imagery.build_gti(cfg,tiles,root)
+            partial=root/'mosaic.partial.gti.gpkg'
+            index.replace(partial)
+            ds=ogr.Open(str(partial),1)
+            layer=ds.GetLayerByName('tiles')
+            self.assertEqual(layer.DeleteFeature(3),ogr.OGRERR_NONE)
+            ds=None
+            resumed=imagery.build_gti(cfg,tiles,root)
+            ds=ogr.Open(str(resumed))
+            layer=ds.GetLayerByName('tiles')
+            self.assertEqual(layer.GetFeatureCount(),3)
+            self.assertEqual(layer.GetFeature(3).GetField('location'),str(common.tile_path(cfg,tiles[2])))
+            ds=None
+            self.assertFalse(partial.exists())
 
     def test_download_errors_are_not_success(self):
         with tempfile.TemporaryDirectory() as tmp:
