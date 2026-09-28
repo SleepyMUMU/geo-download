@@ -24,8 +24,8 @@ def validate_tile(path):
     except (OSError, ValueError):
         return False
 
-def download(cfg, geom):
-    tiles = common.expected_tiles(geom, cfg['zoom'])
+def download(cfg, geom, tiles=None):
+    tiles = common.expected_tiles(geom, cfg['zoom']) if tiles is None else tiles
     if not tiles:
         raise ValueError('没有相交瓦片')
     local = threading.local()
