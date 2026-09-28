@@ -36,6 +36,11 @@ def download(cfg, geom):
         if not hasattr(local, 'session'):
             local.session = requests.Session()
             local.session.trust_env = False
+            # The Wayback tile CDN can reject Python's default user agent with
+            # HTTP 403 while serving the same tile to a normal browser client.
+            local.session.headers['User-Agent'] = (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36')
             if cfg.get('proxy'):
                 local.session.proxies.update({'http': cfg['proxy'], 'https': cfg['proxy']})
         url = cfg['custom_url'].format(x=tile.x, y=tile.y, z=tile.z)
