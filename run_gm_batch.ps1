@@ -18,5 +18,5 @@ if ($PilotProcessId -gt 0) {
         throw '博湖县试跑未通过自动核验；整批未启动。'
     }
 }
-& $python (Join-Path $project 'gm_batch.py') 1>> $stdout 2>> $stderr
+& $python (Join-Path $project 'gm_batch.py') --keep-tiles 1>> $stdout 2>> $stderr
 exit $LASTEXITCODE
