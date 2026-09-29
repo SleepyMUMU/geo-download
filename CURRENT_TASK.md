@@ -1,17 +1,28 @@
 # 新疆影像任务：新对话接手卡
 
-更新于 2026-09-26。**先以磁盘、进程和云端的实时状态为准**；本文是接手入口，不是完成证明。新对话可直接说：
+更新于 2026-09-29。**先以磁盘、进程和云端的实时状态为准**；本文是接手入口，不是完成证明。新对话可直接说：
 
-> 继续 `D:\WorkSpace\AI\Geo Download` 的新疆影像任务。先依次读 `AGENTS.md`、`README.md`、`HANDOFF.md`、`config.yaml` 和 `jobs/xinjiang-selection-bf377779e0/status.md`，再读 `CURRENT_TASK.md`，检查进程、锁、磁盘及各县 sidecar，从当前暂停点安全续做。不要重复启动流水线、下载或上传。
+> 继续 `D:\WorkSpace\AI\Geo Download` 的 GM 原生导出及瓦片 7z 夸克备份。先读 `AGENTS.md`、本文件、`GM_BATCH_README.md` 和 `config.yaml`；检查 GM/7z/上传进程、锁、D 盘、GM 各县 `gm_status.json`、批次 `summary.json` 和备份 `ledger.json`。原脚本版 26 县已完成，不要当成这次 GM 任务完成，不要重复导出、压缩或上传。
 
-## 不变的任务约束
+## 当前任务：GM 原生导出与瓦片备份
+
+- **与下文历史任务区分**：原脚本版 26 县 TIFF 已完成本地和夸克核验。用户后来改用 Global Mapper v26 原生优化调色板重做同一 Shapefile 范围的 8-bit、5 m UTM TIFF，且明确要求 GM 版 **不上传**。GM 默认采样、`PALETTE=OPTIMIZED`、PackBits、无透明背景、内部分块或金字塔；不是旧 GDAL `average`/DEFLATE 输出。新和县 `652925` 已单独 GM 导出，其余 25 县由 `gm_batch.py` 处理。GM 版 `complete` 只表示规格、全图回读和 SHA 自动通过，不冒充逐县人工视觉验收。
+- **原始瓦片备份**：用户另行授权把 Wayback 58924 z16 的 `tiles_v2/4d430470504d4d5926b5/16/` 用 7z LZMA2 高压分包上传到夸克“新疆”文件夹。`run_gm_batch.ps1` 已用 `--keep-tiles`，不能恢复默认的成功后清瓦片行为。`backup_gm_tiles.py` 每次约 10 GiB 独立包，先 `7z t` 和本地 SHA，再由官方 `quarkclouddrive` Skill 在 Agent 可识别前台上传，fresh browse 核准确文件名、字节数和 FID，并把两种 FID 记入 `jobs/gm-tile-backup/ledger.json`。ledger 必须为无 BOM 的 UTF-8。上传失败先重新列表，再恢复官方任务记录，禁止盲目重传。
+- **实时快照（2026-09-29 晚间）**：GM 批处理 24/25 县 `complete`，加独立新和县为 25/26。若羌 `652824` 已通过 GM 自动规格、全图回读和 SHA；且末 `652825` 前次导出意外中断，16 字节损坏 TIFF 已隔离为 `.interrupted-20260929.tif`。旧批处理自然结束并报告该县失败后，已确认无旧进程，以 `--keep-tiles` 启动唯一续跑进程（启动时 PID 28064），复用已核验瓦片和约 52.4 GiB MBTiles 重做且末。**PID 与阶段随时会变，先实时核进程、状态和 `worker.lock`。**
+- **备份快照**：`ledger.json` 前两包 `x47234-47464`、`x47465-47609` 均通过本地 `7z t`/SHA、官方夸克上传及 fresh listing，合计约 21.3 GB。第二包上传首试报服务器内部异常，经确认云端无完整文件后用官方 `upload resume --record-id ... --file-path ...` 成功恢复。原始瓦片与两包本地压缩文件仍保留。其余列未备份，不能声称全量完成。
+- **资源与调度**：唯一 GM 批处理运行中不得再启动第二条；且末重做期间暂停新 7z 压缩/上传，避免资源争用。先前确认剩余且末、若羌的 z16 瓦片 x 范围均在 `47948` 及以上，因此仅在其导出安全间隙可对 `x<47948` 用 `--safe-until-x 47948` 提前打包。GM 全批 `summary.json` 为 `selected=25` 且 `failed_codes=[]`、25 个状态均 `complete` 后，才能不带安全范围打包余下列。每包独立压缩与云端核验，监控 D 盘；仅对应压缩包已云端核验且空间告急时可清理该本地压缩包，保留原始瓦片和 TIFF。
+- **关机门槛**：旧 `shutdown_after_gm.ps1` 监视进程已停止，不能在瓦片备份前重启。现有每小时轻量监控 `gm-7z`；健康且无变化时静默。只有 GM 26 县（含独立新和）全部自动核验、`ledger.json` 覆盖全部当前瓦片 x 列且每包云端 fresh listing 核验、无 GM/7z/上传进程时，才先报告用户，再按授权延迟 60 秒正常关机并关闭监控。任何失败或未核验都不得关机。
+
+下文记录 **原脚本版** 历史流程；其中旧 PID、等待状态、完成后清缓存或关机指令不适用于当前 GM/瓦片备份任务。
+
+## 原脚本版历史约束
 
 - 原始 Shapefile 范围 `19_23.shp` 到 `42_43.shp`，16 个文件、26 个允许地区；自动排除代码 `659001`～`659011`。合并文件按 `xinjiang_batch.py` 的 `SOURCE_FILE_CODES` 解析。
 - Wayback 58924、z16、5×5 m、按县中心选 WGS84 UTM 北半球分带、`average` 重采样、单波段 Byte/256 色调色板、分块 BigTIFF/DEFLATE/内部掩膜/金字塔。使用 `sat` 环境，不改全局环境。
 - `config.yaml` 当前为 GDAL 16 线程、1024 MiB warp 内存和缓存、GTI 拼接。两个地区下载、一个压制、一个上传；同一时刻只能有一个 `xinjiang_batch.py`。用户授权上传到夸克“新疆”目录和完成全部验收后正常关机。
 - 使用官方 `C:\Users\81052\.codex\skills\quarkclouddrive\SKILL.md`，在 Agent 可识别的前台上传；核对云端重新列表的 FID、准确文件名、大小。大文件超过 50 MiB 不能回读，不代表上传失败。保留全部最终本地 TIFF、质量、视觉和回执文件。缓存只能在本地及云端均核验、且未完成地区不再需要时清理。
 
-## 当前暂停点（2026-09-26 16:35 更新）
+## 原脚本版历史记录（2026-09-26 至 2026-09-27）
 
 ### 2026-09-27 06:58：26 县全部验收完成
 

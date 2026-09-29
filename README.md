@@ -1,5 +1,7 @@
 # Geo Download：新疆卫星影像下载流水线
 
+> **当前续作入口（2026-09-29）**：原脚本版 26 县影像已完成并上传。后续另有 Global Mapper 原生 8-bit 导出与 Wayback z16 原始瓦片的 7z/夸克备份，进度和安全续跑见 [CURRENT_TASK.md](CURRENT_TASK.md)，参数及命令见 [GM_BATCH_README.md](GM_BATCH_README.md)。下文描述原脚本流水线，不能用其完成数触发当前 GM 任务关机。
+
 本项目根据用户指定的**原始 Shapefile 文件范围**下载行政区卫星影像，输出 5 m UTM、Global Mapper 风格 8-bit 调色板 GeoTIFF，并可上传到夸克网盘。
 
 > Agent 接手后先读 `AGENTS.md`、本文件和 `config.yaml`。`PROJECT_ARCHIVE_REPORT.md` 是旧版历史材料，不能作为当前操作指令。

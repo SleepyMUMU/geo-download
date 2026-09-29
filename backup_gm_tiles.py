@@ -84,8 +84,10 @@ def main():
 
     command = [str(SEVEN_ZIP), 'a', '-t7z', '-m0=LZMA2', '-mx=9', '-md=64m', '-ms=on',
                '-mmt=8', str(destination), *columns]
-    subprocess.run(command, cwd=SOURCE, check=True)
-    subprocess.run([str(SEVEN_ZIP), 't', str(destination)], check=True)
+    creation_flags = subprocess.HIGH_PRIORITY_CLASS if os.name == 'nt' else 0
+    subprocess.run(command, cwd=SOURCE, check=True, creationflags=creation_flags)
+    subprocess.run([str(SEVEN_ZIP), 't', str(destination)], check=True,
+                   creationflags=creation_flags)
     record = {'archive': str(destination), 'columns': columns, 'file_count': count,
               'source_bytes': total, 'archive_bytes': destination.stat().st_size,
               'sha256': digest(destination), 'local_verified_at': time.strftime('%Y-%m-%d %H:%M:%S'),
