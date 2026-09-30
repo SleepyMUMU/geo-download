@@ -6,8 +6,9 @@ Run with the sat Python interpreter; one county is processed at a time.
 
 import argparse
 import json
-import msvcrt
 import os
+if os.name == 'nt':
+    import msvcrt
 import shutil
 import sqlite3
 import subprocess
@@ -271,6 +272,8 @@ def process_one(root, cfg, row, source_file):
 
 
 def main():
+    if os.name != 'nt':
+        raise RuntimeError('Global Mapper batch execution requires Windows; use cloud_relay.py on Linux')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
     parser.add_argument('--only-code', action='append', default=[])

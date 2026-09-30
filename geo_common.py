@@ -7,7 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 # Conda executables invoked without activation still need their own GDAL/PROJ data.
-for key, suffix in [('GDAL_DATA', 'Library/share/gdal'), ('PROJ_DATA', 'Library/share/proj')]:
+data_base = 'Library/share' if sys.platform == 'win32' else 'share'
+for key, suffix in [('GDAL_DATA', data_base + '/gdal'), ('PROJ_DATA', data_base + '/proj')]:
     candidate = Path(sys.prefix) / suffix
     if candidate.exists():
         os.environ.setdefault(key, str(candidate))
@@ -53,7 +54,9 @@ def load_config(path=None):
 
 def cities(cfg):
     import geopandas as gpd
-    df = gpd.read_file(cfg['city_shp'])
+    # This checked-in DBF contains UTF-8 names but has no .cpg; Linux readers
+    # otherwise guess Latin-1 and cannot resolve the same Chinese city names.
+    df = gpd.read_file(cfg['city_shp'], encoding='UTF-8')
     if df.crs is None:
         raise ValueError('行政边界缺少 CRS，禁止猜测或自动 GCJ02 纠偏')
     for col in ('ct_name', 'pr_name', 'ct_adcode'):

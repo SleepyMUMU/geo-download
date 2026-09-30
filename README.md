@@ -1,5 +1,7 @@
 # Geo Download：新疆卫星影像下载流水线
 
+> **Codex Cloud 独立实验分支**：轻量瓦片流转节点见 [CLOUD_RELAY_README.md](CLOUD_RELAY_README.md)，实测见 [CLOUD_RELAY_RESULTS.md](CLOUD_RELAY_RESULTS.md)，研究方案见 [CODEX_CLOUD_PLAN.md](CODEX_CLOUD_PLAN.md)。它使用独立任务目录，不接管下面的 Windows GM 生产任务。
+
 > **当前续作入口（2026-09-29）**：原脚本版 26 县影像已完成并上传。后续另有 Global Mapper 原生 8-bit 导出与 Wayback z16 原始瓦片的 7z/夸克备份，进度和安全续跑见 [CURRENT_TASK.md](CURRENT_TASK.md)，参数及命令见 [GM_BATCH_README.md](GM_BATCH_README.md)。下文描述原脚本流水线，不能用其完成数触发当前 GM 任务关机。
 
 本项目根据用户指定的**原始 Shapefile 文件范围**下载行政区卫星影像，输出 5 m UTM、Global Mapper 风格 8-bit 调色板 GeoTIFF，并可上传到夸克网盘。

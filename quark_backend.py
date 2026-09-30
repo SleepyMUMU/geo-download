@@ -1,5 +1,5 @@
 """Official CLI adapter. Success requires NDJSON success and a fresh cloud audit."""
-import geo_common as common
+import artifact_utils as common
 import json
 import os
 import shutil

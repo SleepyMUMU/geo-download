@@ -1,6 +1,8 @@
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from pathlib import Path
 
 import mercantile
@@ -59,7 +61,9 @@ class GmBatchTest(unittest.TestCase):
             path = common.tile_path(cfg, tiles[0])
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'cache')
-            plan = check_disk_for_county(root, cfg, tiles)
+            # This tests tile accounting, independently of the runner's disk size.
+            with patch('gm_batch.shutil.disk_usage', return_value=SimpleNamespace(free=100 * 1024**3)):
+                plan = check_disk_for_county(root, cfg, tiles)
             self.assertEqual(plan['missing_tiles'], 1)
 
     def test_verify_palette_packbits_and_full_readback(self):
